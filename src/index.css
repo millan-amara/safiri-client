@@ -1,0 +1,150 @@
+@import "tailwindcss";
+
+@theme {
+  /* ─── New design tokens ─────────────────────────── */
+  --color-background: hsl(0 0% 99%);
+  --color-foreground: hsl(222 25% 12%);
+
+  --color-card: hsl(0 0% 100%);
+  --color-card-foreground: hsl(222 25% 12%);
+
+  --color-primary: hsl(243 75% 59%);
+  --color-primary-foreground: hsl(0 0% 100%);
+
+  --color-secondary: hsl(220 16% 96%);
+  --color-secondary-foreground: hsl(222 25% 20%);
+
+  --color-muted: hsl(220 16% 96%);
+  --color-muted-foreground: hsl(220 10% 52%);
+
+  --color-accent: hsl(220 16% 94%);
+  --color-accent-foreground: hsl(222 25% 12%);
+
+  --color-destructive: hsl(0 78% 57%);
+  --color-destructive-foreground: hsl(0 0% 100%);
+
+  --color-border: hsl(220 16% 90%);
+  --color-input: hsl(220 16% 90%);
+  --color-ring: hsl(243 75% 59%);
+
+  --color-sidebar: hsl(228 30% 18%);
+  --color-sidebar-foreground: hsl(220 20% 88%);
+  --color-sidebar-muted: hsl(228 20% 32%);
+  --color-sidebar-active: hsl(243 75% 59%);
+
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+
+  /* ─── Legacy aliases so existing pages still compile ─────── */
+  /* "sand" scale → neutral grays so the old cream palette becomes clean neutrals */
+  --color-sand-50: hsl(0 0% 99%);
+  --color-sand-100: hsl(220 16% 96%);
+  --color-sand-200: hsl(220 16% 92%);
+  --color-sand-300: hsl(220 12% 82%);
+  --color-sand-400: hsl(220 10% 64%);
+  --color-sand-500: hsl(220 10% 52%);
+  --color-sand-600: hsl(220 12% 38%);
+  --color-sand-700: hsl(222 18% 26%);
+  --color-sand-800: hsl(222 22% 18%);
+  --color-sand-900: hsl(222 25% 12%);
+
+  /* "amber-brand" becomes the indigo primary */
+  --color-amber-brand: hsl(243 75% 59%);
+  --color-amber-50: hsl(243 100% 97%);
+  --color-amber-100: hsl(243 88% 93%);
+  --color-amber-200: hsl(243 82% 86%);
+  --color-amber-700: hsl(243 75% 50%);
+
+  /* "slate-brand" stays as the dark foreground */
+  --color-slate-brand: hsl(222 25% 12%);
+
+  /* Keep safari green scale around for success states — mapped to a tasteful emerald */
+  --color-safari-50: hsl(152 68% 96%);
+  --color-safari-100: hsl(152 68% 90%);
+  --color-safari-200: hsl(152 60% 80%);
+  --color-safari-500: hsl(152 60% 42%);
+  --color-safari-600: hsl(152 62% 36%);
+  --color-safari-700: hsl(152 64% 28%);
+}
+
+
+
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  body {
+    font-family: 'Inter', 'DM Sans', system-ui, -apple-system, sans-serif;
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* ─── Scrollbar ───────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(220 12% 80%);
+}
+
+.kanban-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
+}
+.kanban-scroll::-webkit-scrollbar { height: 6px; }
+.kanban-scroll::-webkit-scrollbar-track { background: transparent; }
+.kanban-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+body.sidebar-open {
+  overflow: hidden;
+}
+
+/* ─── Animations ──────────────────────────────── */
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.animate-slide-up { animation: slideUp 0.4s ease-out forwards; }
+.animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+.animate-scale-in { animation: scaleIn 0.2s ease-out forwards; }
+
+.stagger-children > * {
+  opacity: 0;
+  animation: slideUp 0.4s ease-out forwards;
+}
+.stagger-children > *:nth-child(1) { animation-delay: 0.05s; }
+.stagger-children > *:nth-child(2) { animation-delay: 0.1s; }
+.stagger-children > *:nth-child(3) { animation-delay: 0.15s; }
+.stagger-children > *:nth-child(4) { animation-delay: 0.2s; }
+.stagger-children > *:nth-child(5) { animation-delay: 0.25s; }
+.stagger-children > *:nth-child(6) { animation-delay: 0.3s; }
