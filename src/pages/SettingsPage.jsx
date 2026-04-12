@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import toast from 'react-hot-toast';
 import { getInitials, formatDate } from '../utils/helpers';
@@ -9,6 +10,7 @@ import {
   Plus, Trash2, ToggleLeft, ToggleRight, Shield, Mail, Upload, Image,
   GitBranch, GripVertical, Edit2, X, ChevronUp, ChevronDown,
   Play, Clock, Search, CheckCircle2, AlertCircle, Key, Eye, EyeOff, Copy, Check,
+  CreditCard,
 } from 'lucide-react';
 
 const TABS = [
@@ -17,10 +19,12 @@ const TABS = [
   { id: 'pipelines', label: 'Pipelines', icon: GitBranch },
   { id: 'team', label: 'Team', icon: UsersIcon },
   { id: 'api', label: 'API & Webhooks', icon: Key },
+  { id: 'billing', label: 'Billing', icon: CreditCard },
 ];
 
 export default function SettingsPage() {
   const { organization, updateOrganization } = useAuth();
+  const navigate = useNavigate();
   const [tab, setTab] = useState('branding');
   const [org, setOrg] = useState(null);
   const [team, setTeam] = useState([]);
@@ -68,7 +72,7 @@ export default function SettingsPage() {
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
-              onClick={() => setTab(id)}
+              onClick={() => id === 'billing' ? navigate('/settings/billing') : setTab(id)}
               className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
                 tab === id ? 'bg-primary text-white' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
               }`}
@@ -158,6 +162,27 @@ export default function SettingsPage() {
                 />
               </div>
 
+              <div className="pt-4 border-t border-border">
+                <h4 className="text-sm font-semibold text-foreground mb-1">Cover Quote</h4>
+                <p className="text-xs text-muted-foreground mb-3">Replaces the default Henry Miller quote on the closing page of every quote.</p>
+                <div className="grid grid-cols-[1fr_180px] gap-3">
+                  <textarea
+                    rows={2}
+                    placeholder={`e.g. "Travel makes one modest. You see what a tiny place you occupy in the world."`}
+                    value={org.branding?.coverQuote || ''}
+                    onChange={(e) => setOrg({ ...org, branding: { ...org.branding, coverQuote: e.target.value } })}
+                    className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:border-primary transition-colors resize-none"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Author (optional)"
+                    value={org.branding?.coverQuoteAuthor || ''}
+                    onChange={(e) => setOrg({ ...org, branding: { ...org.branding, coverQuoteAuthor: e.target.value } })}
+                    className="px-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:border-primary transition-colors"
+                  />
+                </div>
+              </div>
+
               <button onClick={saveOrg} disabled={saving} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary transition-colors disabled:opacity-50">
                 <Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save Changes'}
               </button>
@@ -207,6 +232,26 @@ export default function SettingsPage() {
               </div>
 
               <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">WhatsApp Task Reminder</label>
+                <div className="flex items-center gap-3">
+                  <select
+                    value={org.defaults?.taskReminderHours ?? 24}
+                    onChange={(e) => setOrg({ ...org, defaults: { ...org.defaults, taskReminderHours: parseInt(e.target.value) } })}
+                    className="w-48 px-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:border-primary transition-colors"
+                  >
+                    <option value={1}>1 hour before due</option>
+                    <option value={2}>2 hours before due</option>
+                    <option value={4}>4 hours before due</option>
+                    <option value={8}>8 hours before due</option>
+                    <option value={24}>24 hours before due</option>
+                    <option value={48}>2 days before due</option>
+                    <option value={72}>3 days before due</option>
+                  </select>
+                  <p className="text-xs text-muted-foreground">Send reminder WhatsApp this far before a task is due</p>
+                </div>
+              </div>
+
+              <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">n8n Webhook URL (optional)</label>
                 <input
                   type="url"
@@ -225,10 +270,13 @@ export default function SettingsPage() {
 
           {/* TEAM */}
           {tab === 'team' && (
-            <TeamSection team={team} onRefresh={async () => {
-              const { data } = await api.get('/settings/team');
-              setTeam(data.members);
-            }} />
+            <div className="space-y-4">
+              <ProfileSection />
+              <TeamSection team={team} onRefresh={async () => {
+                const { data } = await api.get('/settings/team');
+                setTeam(data.members);
+              }} />
+            </div>
           )}
 
           {/* PIPELINES */}
@@ -298,6 +346,142 @@ function LogoUpload({ logo, onUploaded }) {
     </div>
   );
 }
+function ProfileSection() {
+  const { user } = useAuth();
+  const [name, setName] = useState(user?.name || '');
+  const [phone, setPhone] = useState(user?.phone || '');
+  const [jobTitle, setJobTitle] = useState(user?.jobTitle || '');
+  const [avatar, setAvatar] = useState(user?.avatar || '');
+  const [signature, setSignature] = useState(user?.signature || '');
+  const [signatureNote, setSignatureNote] = useState(user?.signatureNote || '');
+  const [saving, setSaving] = useState(false);
+  const [uploadingField, setUploadingField] = useState(null);
+  const avatarRef = useRef();
+  const signatureRef = useRef();
+
+  const handleAssetUpload = async (e, setter, fieldName) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingField(fieldName);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const { data } = await api.post('/uploads/user-asset', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setter(data.url);
+      toast.success('Uploaded');
+    } catch {
+      toast.error('Upload failed');
+    } finally {
+      setUploadingField(null);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.put('/settings/profile', { name, phone, jobTitle, avatar, signature, signatureNote });
+      toast.success('Profile updated');
+    } catch {
+      toast.error('Update failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-card rounded-xl border border-border p-6 space-y-5">
+      <h3 className="text-base font-semibold text-foreground">My Profile</h3>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-xs font-medium text-muted-foreground mb-1">Name</label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-muted-foreground mb-1">WhatsApp Number</label>
+          <PhoneInput value={phone} onChange={setPhone} />
+        </div>
+        <div className="col-span-2">
+          <label className="block text-xs font-medium text-muted-foreground mb-1">Job Title</label>
+          <input
+            type="text"
+            value={jobTitle}
+            onChange={(e) => setJobTitle(e.target.value)}
+            placeholder="e.g. Travel Designer"
+            className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
+          />
+        </div>
+      </div>
+
+      <div className="pt-4 border-t border-border">
+        <h4 className="text-sm font-semibold text-foreground mb-1">Quote Signature</h4>
+        <p className="text-xs text-muted-foreground mb-4">Shown on the closing section of quotes you author. Adds a personal touch for clients.</p>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-2">Your Photo</label>
+            <div className="flex items-center gap-3">
+              {avatar
+                ? <img src={avatar} alt="" className="w-14 h-14 rounded-full object-cover border border-border" />
+                : <div className="w-14 h-14 rounded-full bg-muted border border-border flex items-center justify-center text-xs text-muted-foreground">None</div>}
+              <input type="file" ref={avatarRef} onChange={(e) => handleAssetUpload(e, setAvatar, 'avatar')} accept="image/*" className="hidden" />
+              <button type="button" onClick={() => avatarRef.current?.click()} disabled={uploadingField === 'avatar'} className="px-3 py-1.5 rounded-lg bg-background border border-border text-xs font-medium text-foreground hover:border-primary transition-colors disabled:opacity-50">
+                {uploadingField === 'avatar' ? 'Uploading...' : avatar ? 'Change' : 'Upload'}
+              </button>
+              {avatar && (
+                <button type="button" onClick={() => setAvatar('')} className="text-xs text-muted-foreground hover:text-foreground">Remove</button>
+              )}
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-2">Signature Image (optional)</label>
+            <div className="flex items-center gap-3">
+              {signature
+                ? <img src={signature} alt="" className="h-12 object-contain border border-border rounded bg-white px-2" />
+                : <div className="h-12 w-24 rounded bg-muted border border-border flex items-center justify-center text-xs text-muted-foreground">None</div>}
+              <input type="file" ref={signatureRef} onChange={(e) => handleAssetUpload(e, setSignature, 'signature')} accept="image/*" className="hidden" />
+              <button type="button" onClick={() => signatureRef.current?.click()} disabled={uploadingField === 'signature'} className="px-3 py-1.5 rounded-lg bg-background border border-border text-xs font-medium text-foreground hover:border-primary transition-colors disabled:opacity-50">
+                {uploadingField === 'signature' ? 'Uploading...' : signature ? 'Change' : 'Upload'}
+              </button>
+              {signature && (
+                <button type="button" onClick={() => setSignature('')} className="text-xs text-muted-foreground hover:text-foreground">Remove</button>
+              )}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1">If not set, your first name renders in a handwritten font.</p>
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <label className="block text-xs font-medium text-muted-foreground mb-1">Personal Note (optional)</label>
+          <textarea
+            value={signatureNote}
+            onChange={(e) => setSignatureNote(e.target.value)}
+            rows={2}
+            placeholder="e.g. It would be a privilege to bring this journey to life for you..."
+            className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:border-primary transition-colors resize-none"
+          />
+        </div>
+      </div>
+
+      <button
+        onClick={handleSave}
+        disabled={saving}
+        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary transition-colors disabled:opacity-50"
+      >
+        <Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save'}
+      </button>
+    </div>
+  );
+}
+
 function TeamSection({ team, onRefresh }) {
   const [showInvite, setShowInvite] = useState(false);
   const [inviteForm, setInviteForm] = useState({ email: '', role: 'agent' });

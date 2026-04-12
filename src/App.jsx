@@ -18,6 +18,7 @@ import AcceptInvitePage from './pages/AcceptInvitePage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
+import BillingPage from './pages/billing/BillingPage';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -59,6 +60,7 @@ export default function App() {
         <Route path="quotes/:id" element={<QuoteBuilderPage />} />
         <Route path="automations" element={<AutomationsPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="settings/billing" element={<BillingPage />} />
       </Route>
     </Routes>
   );

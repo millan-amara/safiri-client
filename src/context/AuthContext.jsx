@@ -51,8 +51,20 @@ export function AuthProvider({ children }) {
 
   const updateOrganization = (org) => setOrganization(org);
 
+  // Re-fetch the current user + org from the server.
+  // Call this after billing events (upgrade, cancel) so the app reflects the new state.
+  const refreshOrganization = async () => {
+    try {
+      const { data } = await api.get('/auth/me');
+      setUser(data.user);
+      setOrganization(data.organization);
+    } catch {
+      // Silently ignore — stale state is better than crashing
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, organization, loading, login, register, logout, updateOrganization }}>
+    <AuthContext.Provider value={{ user, organization, loading, login, register, logout, updateOrganization, refreshOrganization }}>
       {children}
     </AuthContext.Provider>
   );

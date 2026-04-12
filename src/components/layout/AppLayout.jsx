@@ -4,6 +4,8 @@ import { getInitials } from '../../utils/helpers';
 import api from '../../utils/api';
 import toast from 'react-hot-toast';
 import NotificationBell from './NotificationBell';
+import PaywallBanner from '../../pages/billing/PaywallBanner';
+import ReadOnlyBanner from '../../pages/billing/ReadOnlyBanner';
 import {
   LayoutDashboard,
   Database,
@@ -153,6 +155,8 @@ export default function AppLayout() {
           </div>
         </div>
 
+        <ReadOnlyBanner />
+        <PaywallBanner />
         <EmailVerifyBanner user={user} />
         <div className="p-4 lg:p-8 max-w-[1440px]">
           <Outlet />

@@ -2,9 +2,26 @@ import { useState } from 'react';
 import Modal from '../shared/Modal';
 import api from '../../utils/api';
 import toast from 'react-hot-toast';
+import { useAuth } from '../../context/AuthContext';
+
+const REMINDER_OPTIONS = [
+  { value: '',    label: (orgDefault) => `Workspace default (${orgDefault}h before)` },
+  { value: '0',   label: () => 'No reminder' },
+  { value: '0.5', label: () => '30 minutes before' },
+  { value: '1',   label: () => '1 hour before' },
+  { value: '2',   label: () => '2 hours before' },
+  { value: '4',   label: () => '4 hours before' },
+  { value: '8',   label: () => '8 hours before' },
+  { value: '24',  label: () => '1 day before' },
+  { value: '48',  label: () => '2 days before' },
+  { value: '72',  label: () => '3 days before' },
+];
 
 export default function TaskModal({ task, deals, team, onClose, onSaved }) {
   const isEdit = !!task?._id;
+  const { organization } = useAuth();
+  const orgDefaultHours = organization?.defaults?.taskReminderHours ?? 24;
+
   const [form, setForm] = useState({
     title: task?.title || '',
     description: task?.description || '',
@@ -13,6 +30,7 @@ export default function TaskModal({ task, deals, team, onClose, onSaved }) {
     dueDate: task?.dueDate ? task.dueDate.slice(0, 16) : '',
     priority: task?.priority || 'medium',
     status: task?.status || 'todo',
+    reminderHours: task?.reminderHours != null ? String(task.reminderHours) : '',
   });
   const [saving, setSaving] = useState(false);
 
@@ -26,6 +44,7 @@ export default function TaskModal({ task, deals, team, onClose, onSaved }) {
         deal: form.deal || undefined,
         assignedTo: form.assignedTo || undefined,
         dueDate: form.dueDate || undefined,
+        reminderHours: form.reminderHours === '' ? null : parseFloat(form.reminderHours),
       };
       if (isEdit) {
         await api.put(`/crm/tasks/${task._id}`, payload);
@@ -68,6 +87,14 @@ export default function TaskModal({ task, deals, team, onClose, onSaved }) {
             <label className="block text-xs font-medium text-muted-foreground mb-1">Due Date & Time</label>
             <input type="datetime-local" value={form.dueDate} onChange={e => setForm({...form, dueDate: e.target.value})} className={inputCls} />
           </div>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-muted-foreground mb-1">WhatsApp Reminder</label>
+          <select value={form.reminderHours} onChange={e => setForm({...form, reminderHours: e.target.value})} className={inputCls}>
+            {REMINDER_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label(orgDefaultHours)}</option>
+            ))}
+          </select>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>

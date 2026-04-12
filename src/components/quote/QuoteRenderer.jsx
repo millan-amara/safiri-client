@@ -1,5 +1,24 @@
 import { useState, useEffect, useRef } from 'react';
-import { formatCurrency, formatDate, mealPlanLabels } from '../../utils/helpers';
+import { mealPlanLabels } from '../../utils/helpers';
+
+const COUNTRY_LOCALE = {
+  'Kenya': 'en-KE', 'Tanzania': 'en-TZ', 'Uganda': 'en-UG',
+  'United Kingdom': 'en-GB', 'UK': 'en-GB', 'Ireland': 'en-IE',
+  'United States': 'en-US', 'USA': 'en-US', 'Canada': 'en-CA',
+  'Australia': 'en-AU', 'New Zealand': 'en-NZ',
+  'Germany': 'de-DE', 'France': 'fr-FR', 'Spain': 'es-ES', 'Italy': 'it-IT',
+  'Netherlands': 'nl-NL', 'Belgium': 'nl-BE', 'Portugal': 'pt-PT',
+  'Brazil': 'pt-BR', 'Mexico': 'es-MX',
+  'Japan': 'ja-JP', 'China': 'zh-CN', 'India': 'en-IN', 'UAE': 'en-AE',
+  'South Africa': 'en-ZA',
+};
+
+const makeFormatters = (locale) => ({
+  formatDate: (d, opts = { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) =>
+    d ? new Date(d).toLocaleDateString(locale, opts) : '',
+  formatCurrency: (amt, cur = 'USD') =>
+    new Intl.NumberFormat(locale, { style: 'currency', currency: cur, currencyDisplay: 'narrowSymbol', minimumFractionDigits: 0 }).format(amt || 0),
+});
 import {
   MapPin, Calendar, Users as UsersIcon, Clock, ChevronDown,
   Sun, Sunrise, Sunset, Moon, Coffee, Star, Phone, Mail,
@@ -15,12 +34,102 @@ const timeIcons = {
   night: Moon,
 };
 
+const patternDot = (color) => `url("data:image/svg+xml;utf8,${encodeURIComponent(
+  `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><circle cx='2' cy='2' r='1' fill='${color}' opacity='0.25'/></svg>`
+)}")`;
+const patternGrid = (color) => `url("data:image/svg+xml;utf8,${encodeURIComponent(
+  `<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><path d='M0 16 L32 16 M16 0 L16 32' stroke='${color}' stroke-width='0.5' opacity='0.2'/></svg>`
+)}")`;
+const patternLines = (color) => `url("data:image/svg+xml;utf8,${encodeURIComponent(
+  `<svg xmlns='http://www.w3.org/2000/svg' width='60' height='12'><path d='M0 6 L60 6' stroke='${color}' stroke-width='0.5' opacity='0.18'/></svg>`
+)}")`;
+
+const STYLE_PRESETS = {
+  editorial: {
+    fontLink: 'https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Playfair+Display:wght@500;600;700;800&family=Caveat:wght@500;700&display=swap',
+    body: "'DM Sans', system-ui, sans-serif",
+    heading: "'Playfair Display', serif",
+    headingWeight: 700,
+    coverH1: 'clamp(2.5rem, 6vw, 4rem)',
+    pattern: patternDot,
+    photoRadius: '0.75rem',
+    photoFrame: null,
+  },
+  modern: {
+    fontLink: 'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Caveat:wght@500;700&display=swap',
+    body: "'Inter', system-ui, sans-serif",
+    heading: "'Inter', system-ui, sans-serif",
+    headingWeight: 800,
+    coverH1: 'clamp(2.75rem, 6.5vw, 4.5rem)',
+    pattern: patternGrid,
+    photoRadius: '0',
+    photoFrame: null,
+  },
+  minimal: {
+    fontLink: 'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Nunito+Sans:wght@300;400;600;700&family=Caveat:wght@500;700&display=swap',
+    body: "'Nunito Sans', system-ui, sans-serif",
+    heading: "'Cormorant Garamond', serif",
+    headingWeight: 500,
+    coverH1: 'clamp(3rem, 7vw, 5rem)',
+    pattern: patternLines,
+    photoRadius: '2px',
+    photoFrame: { padding: '8px', background: '#fff', border: '1px solid #e7e5e4' },
+  },
+};
+
 export default function QuoteRenderer({ quote, token, previewMode = false }) {
   const [activeDay, setActiveDay] = useState(0);
+  const [lightbox, setLightbox] = useState(null); // { images, index }
   const heroRef = useRef(null);
+
+  const openLightbox = (images, index) => setLightbox({ images, index });
+  const closeLightbox = () => setLightbox(null);
+  const nextLightbox = () => setLightbox(l => l && { ...l, index: (l.index + 1) % l.images.length });
+  const prevLightbox = () => setLightbox(l => l && { ...l, index: (l.index - 1 + l.images.length) % l.images.length });
+
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') closeLightbox();
+      else if (e.key === 'ArrowRight') nextLightbox();
+      else if (e.key === 'ArrowLeft') prevLightbox();
+    };
+    window.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [lightbox]);
 
   const brand = quote.brandingSnapshot || {};
   const primaryColor = brand.primaryColor || '#B45309';
+  const secondaryColor = brand.secondaryColor || primaryColor;
+  const locale = COUNTRY_LOCALE[quote.contact?.country] || 'en-US';
+  const { formatDate, formatCurrency } = makeFormatters(locale);
+  const isDraft = quote.status === 'draft';
+  const style = STYLE_PRESETS[quote.pdfStyle] || STYLE_PRESETS.editorial;
+  const coverLayout = quote.coverLayout || 'full_bleed';
+  const coverImg = quote.coverImage?.url || quote.days?.find(d => d.images?.[0]?.url)?.images?.[0]?.url || quote.days?.find(d => d.hotel?.images?.[0]?.url)?.hotel?.images?.[0]?.url || '';
+
+  // Inject the chosen font stylesheet once on mount
+  useEffect(() => {
+    const id = 'quote-style-font';
+    let link = document.getElementById(id);
+    if (!link) {
+      link = document.createElement('link');
+      link.id = id;
+      link.rel = 'stylesheet';
+      document.head.appendChild(link);
+    }
+    link.href = style.fontLink;
+  }, [style.fontLink]);
+
+  const headingStyle = { fontFamily: style.heading, fontWeight: style.headingWeight };
+  const accentBarStyle = { background: `linear-gradient(90deg, ${primaryColor} 0%, ${secondaryColor} 100%)` };
+  const patternUrl = style.pattern(primaryColor);
+  const photoWrap = { borderRadius: style.photoRadius, overflow: 'hidden', ...(style.photoFrame || {}) };
   const totalDays = quote.days?.length || 0;
   const totalNights = Math.max(0, totalDays - 1);
   const totalPax = (quote.travelers?.adults || 0) + (quote.travelers?.children || 0);
@@ -84,64 +193,120 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
     }
   }
 
+  const quickFacts = [
+    { icon: Calendar, label: 'Duration', value: `${totalDays} Days / ${totalNights} Nights` },
+    { icon: UsersIcon, label: 'Travelers', value: `${totalPax} Traveler${totalPax !== 1 ? 's' : ''}` },
+    { icon: MapPin, label: 'Start', value: quote.startPoint },
+    { icon: Calendar, label: 'Date', value: quote.startDate ? formatDate(quote.startDate) : 'TBD' },
+  ];
+
+  const FactCard = ({ icon: Icon, label, value, dark = false }) => (
+    <div className={`rounded-xl p-3 border ${dark ? 'bg-white/10 backdrop-blur-sm border-white/20 text-white' : 'bg-white/70 backdrop-blur-sm border-stone-200/60'}`}>
+      <div className="flex items-center gap-1.5 mb-1">
+        <Icon className="w-3.5 h-3.5" style={{ color: dark ? '#fff' : primaryColor }} />
+        <span className={`text-[10px] uppercase tracking-wide font-semibold ${dark ? 'text-white/70' : 'text-stone-400'}`}>{label}</span>
+      </div>
+      <p className={`text-sm font-semibold ${dark ? 'text-white' : 'text-stone-800'}`}>{value}</p>
+    </div>
+  );
+
   return (
-    <div className="min-h-screen bg-stone-50" style={{ '--brand': primaryColor }}>
-      {/* ─── HERO COVER ─────────────────────────────── */}
-      <header
-        ref={heroRef}
-        className="relative min-h-[85vh] flex items-end"
-        style={{
-          background: `linear-gradient(135deg, ${primaryColor}18 0%, ${primaryColor}08 50%, transparent 100%)`,
-        }}
-      >
-        {/* Decorative elements */}
-        <div className="absolute top-0 right-0 w-1/3 h-full opacity-5">
-          <div className="absolute top-16 right-16 w-40 h-40 rounded-full" style={{ backgroundColor: primaryColor }} />
-          <div className="absolute bottom-32 right-32 w-24 h-24 rounded-full" style={{ backgroundColor: primaryColor }} />
-        </div>
-
-        <div className="relative z-10 w-full max-w-5xl mx-auto px-6 pb-16 pt-24">
-          {/* Logo */}
-          {brand.logo && (
-            <img src={brand.logo} alt={brand.companyName} className="h-12 mb-8 object-contain" />
-          )}
-          {!brand.logo && brand.companyName && (
-            <p className="text-sm font-semibold uppercase tracking-widest mb-6" style={{ color: primaryColor }}>{brand.companyName}</p>
-          )}
-
-          <p className="text-sm text-stone-500 mb-2">Proposal for {quote.contact?.firstName} {quote.contact?.lastName}</p>
-          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-stone-900 leading-tight mb-8" style={{ fontFamily: 'Playfair Display, serif' }}>
-            {quote.title}
-          </h1>
-
-          {quote.coverNarrative && (
-            <p className="text-base text-stone-600 max-w-2xl leading-relaxed mb-10">{quote.coverNarrative}</p>
-          )}
-
-          {/* Quick facts */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-2xl">
-            {[
-              { icon: Calendar, label: 'Duration', value: `${totalDays} Days / ${totalNights} Nights` },
-              { icon: UsersIcon, label: 'Travelers', value: `${totalPax} Traveler${totalPax !== 1 ? 's' : ''}` },
-              { icon: MapPin, label: 'Start', value: quote.startPoint },
-              { icon: Calendar, label: 'Date', value: quote.startDate ? formatDate(quote.startDate) : 'TBD' },
-            ].map(({ icon: Icon, label, value }) => (
-              <div key={label} className="bg-white/70 backdrop-blur-sm rounded-xl p-3 border border-stone-200/60">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <Icon className="w-3.5 h-3.5" style={{ color: primaryColor }} />
-                  <span className="text-[10px] uppercase tracking-wide text-stone-400 font-semibold">{label}</span>
-                </div>
-                <p className="text-sm font-semibold text-stone-800">{value}</p>
-              </div>
-            ))}
+    <div
+      className="min-h-screen bg-stone-50 relative"
+      style={{
+        '--brand': primaryColor,
+        fontFamily: style.body,
+        backgroundImage: patternUrl,
+        backgroundAttachment: 'fixed',
+      }}
+    >
+      {isDraft && (
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center overflow-hidden">
+          <div
+            style={{
+              fontFamily: style.heading,
+              fontWeight: 800,
+              fontSize: 'clamp(6rem, 18vw, 14rem)',
+              letterSpacing: '0.3em',
+              color: 'rgba(220, 38, 38, 0.09)',
+              border: '8px solid rgba(220, 38, 38, 0.14)',
+              padding: '0.5rem 2.5rem',
+              borderRadius: '14px',
+              transform: 'rotate(-24deg)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            DRAFT
           </div>
         </div>
-      </header>
+      )}
+      {/* ─── HERO COVER ─────────────────────────────── */}
+      {coverLayout === 'split' ? (
+        <header ref={heroRef} className="grid md:grid-cols-[45%_55%] min-h-[85vh]">
+          <div className="relative min-h-[320px] overflow-hidden" style={{ background: `linear-gradient(135deg, ${primaryColor}, ${secondaryColor})` }}>
+            {coverImg && <img src={coverImg} alt="" className="w-full h-full object-cover" />}
+          </div>
+          <div className="p-8 sm:p-12 lg:p-16 flex flex-col justify-center bg-white">
+            {brand.logo
+              ? <img src={brand.logo} alt={brand.companyName} className="h-10 mb-8 object-contain" />
+              : brand.companyName && <p className="text-sm font-semibold uppercase tracking-widest mb-6" style={{ color: primaryColor }}>{brand.companyName}</p>}
+            <p className="text-xs uppercase tracking-[0.25em] font-semibold mb-4" style={{ color: primaryColor }}>Travel Proposal</p>
+            <p className="text-sm text-stone-500 mb-2">Proposal for {quote.contact?.firstName} {quote.contact?.lastName}</p>
+            <h1 className="text-stone-900 leading-[1.05] mb-6" style={{ ...headingStyle, fontSize: style.coverH1 }}>{quote.title}</h1>
+            {quote.coverNarrative && <p className="text-base text-stone-600 leading-relaxed mb-8">{quote.coverNarrative}</p>}
+            <div className="grid grid-cols-2 gap-3 max-w-md">
+              {quickFacts.map(f => <FactCard key={f.label} {...f} />)}
+            </div>
+          </div>
+        </header>
+      ) : coverLayout === 'band' ? (
+        <header ref={heroRef} className="flex flex-col min-h-[85vh]">
+          <div className="relative h-[40vh] min-h-[260px] overflow-hidden" style={{ background: `linear-gradient(135deg, ${primaryColor}, ${secondaryColor})` }}>
+            {coverImg && <img src={coverImg} alt="" className="w-full h-full object-cover" />}
+          </div>
+          <div className="h-1" style={{ background: `linear-gradient(90deg, ${primaryColor}, ${secondaryColor})` }} />
+          <div className="flex-1 max-w-5xl w-full mx-auto px-6 py-12 sm:py-16 bg-white">
+            <div className="flex items-center justify-between mb-8">
+              {brand.logo
+                ? <img src={brand.logo} alt={brand.companyName} className="h-10 object-contain" />
+                : <p className="text-sm font-semibold uppercase tracking-widest" style={{ color: primaryColor }}>{brand.companyName}</p>}
+              <p className="text-xs uppercase tracking-[0.25em] font-semibold" style={{ color: primaryColor }}>Travel Proposal</p>
+            </div>
+            <p className="text-sm text-stone-500 mb-2">Proposal for {quote.contact?.firstName} {quote.contact?.lastName}</p>
+            <h1 className="text-stone-900 leading-[1.05] mb-6" style={{ ...headingStyle, fontSize: style.coverH1 }}>{quote.title}</h1>
+            {quote.coverNarrative && <p className="text-base text-stone-600 max-w-2xl leading-relaxed mb-8">{quote.coverNarrative}</p>}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-2xl">
+              {quickFacts.map(f => <FactCard key={f.label} {...f} />)}
+            </div>
+          </div>
+        </header>
+      ) : (
+        <header
+          ref={heroRef}
+          className="relative min-h-[85vh] flex items-end overflow-hidden"
+          style={{ background: coverImg ? '#000' : `linear-gradient(135deg, ${primaryColor}, ${secondaryColor})` }}
+        >
+          {coverImg && <img src={coverImg} alt="" className="absolute inset-0 w-full h-full object-cover" />}
+          <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.15) 40%, rgba(0,0,0,0.85) 100%)' }} />
+          <div className="relative z-10 w-full max-w-5xl mx-auto px-6 pb-16 pt-24 text-white">
+            {brand.logo
+              ? <img src={brand.logo} alt={brand.companyName} className="h-12 mb-8 object-contain" />
+              : brand.companyName && <p className="text-sm font-semibold uppercase tracking-widest mb-6 text-white">{brand.companyName}</p>}
+            <p className="text-xs uppercase tracking-[0.25em] font-semibold mb-4 text-white/80">Travel Proposal</p>
+            <p className="text-sm text-white/80 mb-2">Proposal for {quote.contact?.firstName} {quote.contact?.lastName}</p>
+            <h1 className="text-white leading-[1.05] mb-8" style={{ ...headingStyle, fontSize: style.coverH1 }}>{quote.title}</h1>
+            {quote.coverNarrative && <p className="text-base text-white/90 max-w-2xl leading-relaxed mb-10">{quote.coverNarrative}</p>}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-2xl">
+              {quickFacts.map(f => <FactCard key={f.label} {...f} dark />)}
+            </div>
+          </div>
+        </header>
+      )}
 
       {/* ─── HIGHLIGHTS BLOCK ───────────────────────── */}
       {blockEnabled('highlights') && (
         <section className="max-w-5xl mx-auto px-6 py-16">
-          <h2 className="text-2xl font-bold text-stone-900 mb-6" style={{ fontFamily: 'Playfair Display, serif' }}>
+          <h2 className="text-2xl font-bold text-stone-900 mb-6" style={headingStyle}>
             Your Itinerary at a Glance
           </h2>
 
@@ -197,13 +362,13 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
 
       {/* ─── ROUTE MAP BLOCK ────────────────────────── */}
       {blockEnabled('map') && (
-        <RouteMap days={quote.days || []} startPoint={quote.startPoint} endPoint={quote.endPoint} primaryColor={primaryColor} />
+        <RouteMap days={quote.days || []} startPoint={quote.startPoint} endPoint={quote.endPoint} primaryColor={primaryColor} headingStyle={headingStyle} />
       )}
 
       {/* ─── DAY BY DAY BLOCK ───────────────────────── */}
       {blockEnabled('day_by_day') && (
         <section className="max-w-5xl mx-auto px-6 pb-16">
-          <h2 className="text-2xl font-bold text-stone-900 mb-8" style={{ fontFamily: 'Playfair Display, serif' }}>
+          <h2 className="text-2xl font-bold text-stone-900 mb-8" style={headingStyle}>
             Day by Day
           </h2>
 
@@ -241,7 +406,12 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
               </button>
 
               {/* Day content */}
-              {activeDay === i && (
+              <div
+                className={`grid transition-all duration-500 ease-out ${
+                  activeDay === i ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+                }`}
+              >
+                <div className="overflow-hidden">
                 <div className="border-t border-stone-100 bg-stone-50/50">
                   <div className="grid grid-cols-1 lg:grid-cols-5 gap-0">
                     {/* Left — narrative + images */}
@@ -251,11 +421,31 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                       )}
 
                       {day.heroImage?.url && (
-                        <img
-                          src={day.heroImage.url}
-                          alt={day.destination}
-                          className="w-full h-48 object-cover rounded-xl mb-4"
-                        />
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => openLightbox(day.images, 0)}
+                            className="mb-3 block w-full group"
+                            style={photoWrap}
+                          >
+                            <img src={day.heroImage.url} alt={day.destination} className="w-full h-48 object-cover block transition-transform duration-500 group-hover:scale-[1.02]" />
+                          </button>
+                          {day.images.length > 1 && (
+                            <div className="grid grid-cols-6 gap-1.5 mb-5">
+                              {day.images.slice(1, 7).map((img, gi) => (
+                                <button
+                                  key={gi}
+                                  type="button"
+                                  onClick={() => openLightbox(day.images, gi + 1)}
+                                  className="aspect-square overflow-hidden bg-stone-100 hover:opacity-80 transition-opacity"
+                                  style={{ borderRadius: style.photoRadius }}
+                                >
+                                  <img src={img.url} alt="" className="w-full h-full object-cover" />
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </>
                       )}
 
                       {day.transport && (
@@ -300,7 +490,9 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                             <p className="text-xs text-stone-500 mt-2 leading-relaxed line-clamp-4">{day.hotel.description}</p>
                           )}
                           {day.hotel.images?.[0]?.url && (
-                            <img src={day.hotel.images[0].url} alt={day.hotel.name} className="w-full h-28 object-cover rounded-lg mt-3" />
+                            <div className="mt-3" style={photoWrap}>
+                              <img src={day.hotel.images[0].url} alt={day.hotel.name} className="w-full h-28 object-cover block" />
+                            </div>
                           )}
                         </div>
                       )}
@@ -317,7 +509,8 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                     </div>
                   </div>
                 </div>
-              )}
+                </div>
+              </div>
             </div>
           ))}
         </div>
@@ -327,12 +520,12 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
       {/* ─── ACCOMMODATIONS BLOCK ───────────────────── */}
       {blockEnabled('accommodations') && uniqueHotels.length > 0 && (
         <section className="max-w-5xl mx-auto px-6 pb-16">
-          <h2 className="text-2xl font-bold text-stone-900 mb-6" style={{ fontFamily: 'Playfair Display, serif' }}>
+          <h2 className="text-2xl font-bold text-stone-900 mb-6" style={headingStyle}>
             Where You'll Stay
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {uniqueHotels.map((hotel, i) => (
-              <div key={i} className="rounded-2xl overflow-hidden border border-stone-200 bg-white">
+              <div key={i} className="border border-stone-200 bg-white" style={photoWrap}>
                 {hotel.images?.[0]?.url && (
                   <div className="h-48 bg-stone-100 overflow-hidden">
                     <img src={hotel.images[0].url} alt={hotel.name} className="w-full h-full object-cover" />
@@ -359,7 +552,7 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
       <section className="max-w-5xl mx-auto px-6 pb-16">
         <div className="rounded-2xl overflow-hidden border border-stone-200 bg-white">
           <div className="p-8 text-center" style={{ background: `linear-gradient(135deg, ${primaryColor}08, ${primaryColor}15)` }}>
-            <h2 className="text-2xl font-bold text-stone-900 mb-2" style={{ fontFamily: 'Playfair Display, serif' }}>
+            <h2 className="text-2xl font-bold text-stone-900 mb-2" style={headingStyle}>
               Pricing
             </h2>
             <p className="text-sm text-stone-500">
@@ -459,7 +652,7 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
 
       {/* ─── CLIENT RESPONSE ─────────────────────────── */}
       {!previewMode && quote.status !== 'accepted' && (
-        <ClientResponseSection token={token} quoteStatus={quote.status} primaryColor={primaryColor} />
+        <ClientResponseSection token={token} quoteStatus={quote.status} primaryColor={primaryColor} headingStyle={headingStyle} />
       )}
       {!previewMode && quote.status === 'accepted' && (
         <section className="max-w-5xl mx-auto px-6 pb-16">
@@ -467,7 +660,7 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
             <div className="w-14 h-14 rounded-full bg-green-500 text-white flex items-center justify-center mx-auto mb-4">
               <CheckCircle className="w-7 h-7" />
             </div>
-            <h3 className="text-xl font-bold text-green-800 mb-2" style={{ fontFamily: 'Playfair Display, serif' }}>
+            <h3 className="text-xl font-bold text-green-800 mb-2" style={headingStyle}>
               Quote Accepted
             </h3>
             <p className="text-sm text-green-600">Thank you! The team will be in touch shortly to finalize your booking.</p>
@@ -480,17 +673,15 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
         <div className="max-w-5xl mx-auto px-6 py-16">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-10">
             <div>
-              <h3 className="text-lg font-bold text-stone-900 mb-3" style={{ fontFamily: 'Playfair Display, serif' }}>
+              <h3 className="text-lg font-bold text-stone-900 mb-3" style={headingStyle}>
                 About {brand.companyName || 'Us'}
               </h3>
-              <p className="text-sm text-stone-500 leading-relaxed">
-                {quote.brandingSnapshot?.companyName
-                  ? `We look forward to making your trip unforgettable. Don't hesitate to reach out with any questions.`
-                  : ''}
+              <p className="text-sm text-stone-500 leading-relaxed whitespace-pre-line">
+                {brand.aboutUs || `We look forward to making your trip unforgettable. Don't hesitate to reach out with any questions.`}
               </p>
             </div>
             <div>
-              <h3 className="text-lg font-bold text-stone-900 mb-3" style={{ fontFamily: 'Playfair Display, serif' }}>Contact</h3>
+              <h3 className="text-lg font-bold text-stone-900 mb-3" style={headingStyle}>Contact</h3>
               <div className="space-y-2">
                 {brand.companyEmail && (
                   <a href={`mailto:${brand.companyEmail}`} className="flex items-center gap-2 text-sm text-stone-600 hover:text-stone-900 transition-colors">
@@ -511,6 +702,50 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
             </div>
           </div>
 
+          {quote.createdBy?.name && (
+            <div className="mt-10 flex justify-center">
+              <div className="max-w-xl w-full bg-white border border-stone-200 rounded-2xl p-6 sm:p-8 text-center" style={{ borderRadius: style.photoRadius }}>
+                <p className="text-sm text-stone-600 italic leading-relaxed mb-5">
+                  {quote.signatureNote || quote.closingNote || `It would be a privilege to bring this journey to life for you. I'm here to answer any questions and tailor anything you'd like to adjust.`}
+                </p>
+                {quote.createdBy.signature ? (
+                  <img src={quote.createdBy.signature} alt="signature" className="h-12 object-contain mx-auto mb-3" />
+                ) : (
+                  <div className="mb-3" style={{ fontFamily: "'Caveat', 'Brush Script MT', cursive", fontSize: '32px', color: primaryColor, lineHeight: 1 }}>
+                    {quote.createdBy.name.split(' ')[0]}
+                  </div>
+                )}
+                <div className="flex items-center justify-center gap-3 mt-3">
+                  {quote.createdBy.avatar && (
+                    <img src={quote.createdBy.avatar} alt="" className="w-10 h-10 rounded-full object-cover ring-2 ring-white shadow-sm" />
+                  )}
+                  <div className="text-left">
+                    <div className="text-sm font-bold text-stone-900">{quote.createdBy.name}</div>
+                    <div className="text-xs text-stone-500">
+                      {quote.createdBy.jobTitle || 'Travel Designer'}
+                      {brand.companyName && ` · ${brand.companyName}`}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {(brand.coverQuote || true) && (() => {
+            const q = brand.coverQuote || "One's destination is never a place, but a new way of seeing things.";
+            const author = brand.coverQuote ? (brand.coverQuoteAuthor || '') : 'Henry Miller';
+            return (
+              <div className="mt-12 text-center">
+                <p className="text-base sm:text-lg text-stone-400 italic leading-relaxed" style={{ fontFamily: style.heading }}>
+                  "{q}"
+                </p>
+                {author && (
+                  <p className="text-[10px] tracking-[0.25em] uppercase text-stone-300 mt-3">— {author}</p>
+                )}
+              </div>
+            );
+          })()}
+
           <div className="mt-12 pt-6 border-t border-stone-200 flex items-center justify-between">
             <p className="text-xs text-stone-400">
               Quote #{quote.quoteNumber} · Version {quote.version || 1}
@@ -521,6 +756,50 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
           </div>
         </div>
       </footer>
+
+      {lightbox && (
+        <div
+          onClick={closeLightbox}
+          className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4 sm:p-10"
+        >
+          <button
+            onClick={(e) => { e.stopPropagation(); closeLightbox(); }}
+            className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center text-xl"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+          {lightbox.images.length > 1 && (
+            <>
+              <button
+                onClick={(e) => { e.stopPropagation(); prevLightbox(); }}
+                className="absolute left-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center text-2xl"
+                aria-label="Previous"
+              >
+                ‹
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); nextLightbox(); }}
+                className="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center text-2xl"
+                aria-label="Next"
+              >
+                ›
+              </button>
+            </>
+          )}
+          <div onClick={(e) => e.stopPropagation()} className="max-w-5xl max-h-full flex flex-col items-center">
+            <img
+              src={lightbox.images[lightbox.index]?.url}
+              alt=""
+              className="max-w-full max-h-[80vh] object-contain rounded-lg"
+            />
+            {lightbox.images[lightbox.index]?.caption && (
+              <p className="mt-4 text-sm text-white/80 text-center max-w-2xl">{lightbox.images[lightbox.index].caption}</p>
+            )}
+            <p className="mt-2 text-xs text-white/50">{lightbox.index + 1} / {lightbox.images.length}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -545,7 +824,7 @@ function getCoords(name) {
   return null;
 }
 
-function RouteMap({ days, startPoint, endPoint, primaryColor }) {
+function RouteMap({ days, startPoint, endPoint, primaryColor, headingStyle = {} }) {
   const mapRef = useRef(null);
   const [mapReady, setMapReady] = useState(false);
 
@@ -667,7 +946,7 @@ function RouteMap({ days, startPoint, endPoint, primaryColor }) {
 
   return (
     <section className="max-w-5xl mx-auto px-6 pb-16">
-      <h2 className="text-2xl font-bold text-stone-900 mb-6" style={{ fontFamily: 'Playfair Display, serif' }}>
+      <h2 className="text-2xl font-bold text-stone-900 mb-6" style={headingStyle}>
         Your Route
       </h2>
       <div className="rounded-2xl overflow-hidden border border-stone-200 bg-white">
@@ -697,7 +976,7 @@ function RouteMap({ days, startPoint, endPoint, primaryColor }) {
   );
 }
 
-function ClientResponseSection({ token, quoteStatus, primaryColor }) {
+function ClientResponseSection({ token, quoteStatus, primaryColor, headingStyle = {} }) {
   const [mode, setMode] = useState(null); // null | 'accept' | 'changes'
   const [message, setMessage] = useState('');
   const [clientName, setClientName] = useState('');
@@ -765,7 +1044,7 @@ function ClientResponseSection({ token, quoteStatus, primaryColor }) {
     <section className="max-w-5xl mx-auto px-6 pb-16">
       <div className="rounded-2xl border border-stone-200 bg-white overflow-hidden">
         <div className="p-8 text-center" style={{ background: `linear-gradient(135deg, ${primaryColor}06, ${primaryColor}12)` }}>
-          <h2 className="text-xl font-bold text-stone-900 mb-2" style={{ fontFamily: 'Playfair Display, serif' }}>
+          <h2 className="text-xl font-bold text-stone-900 mb-2" style={headingStyle}>
             Ready to proceed?
           </h2>
           <p className="text-sm text-stone-500 mb-6">Choose an option below to move forward with this proposal</p>

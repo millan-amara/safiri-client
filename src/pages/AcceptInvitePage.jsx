@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import toast from 'react-hot-toast';
 import { Compass, Eye, EyeOff, CheckCircle } from 'lucide-react';
+import PhoneInput from '../components/shared/PhoneInput';
 
 export default function AcceptInvitePage() {
   const [searchParams] = useSearchParams();
@@ -13,6 +14,7 @@ export default function AcceptInvitePage() {
   const [inviteData, setInviteData] = useState(null);
   const [error, setError] = useState(null);
   const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -32,7 +34,7 @@ export default function AcceptInvitePage() {
     if (password.length < 6) { toast.error('Password must be at least 6 characters'); return; }
     setSubmitting(true);
     try {
-      const { data } = await api.post(`/auth/invite/${token}`, { name, password });
+      const { data } = await api.post(`/auth/invite/${token}`, { name, password, phone });
       localStorage.setItem('token', data.token);
       setDone(true);
       setTimeout(() => { navigate('/'); window.location.reload(); }, 2000);
@@ -134,6 +136,10 @@ export default function AcceptInvitePage() {
               placeholder="Repeat password"
               required
             />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">WhatsApp Number</label>
+            <PhoneInput value={phone} onChange={setPhone} />
           </div>
           <button
             type="submit"

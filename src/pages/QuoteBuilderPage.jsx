@@ -310,8 +310,7 @@ export default function QuoteBuilderPage() {
                 <Eye className="w-4 h-4" /> Share Link
               </button>
               <a
-                href={`/api/pdf/${id}/pdf?token=${localStorage.getItem('token')}`}
-                target="_blank"
+                href={`/api/pdf/${id}/pdf/download?token=${localStorage.getItem('token')}`}
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm font-medium text-muted-foreground hover:border-border transition-colors"
               >
@@ -483,6 +482,56 @@ export default function QuoteBuilderPage() {
                 placeholder="A brief introduction for your client — AI can generate this for you"
                 className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:border-primary transition-colors resize-none"
               />
+            </div>
+            <div className="mt-4">
+              <label className="block text-xs font-medium text-muted-foreground mb-2">Style</label>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'editorial', name: 'Editorial', desc: 'Serif headings, classic' },
+                  { id: 'modern', name: 'Modern', desc: 'Bold sans, clean' },
+                  { id: 'minimal', name: 'Minimal', desc: 'Elegant, airy' },
+                ].map(s => {
+                  const active = (quote.pdfStyle || 'editorial') === s.id;
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => setQuote({ ...quote, pdfStyle: s.id })}
+                      className={`text-left px-3 py-2 rounded-lg border transition-colors ${
+                        active ? 'border-primary bg-primary/5' : 'border-border bg-background hover:border-muted-foreground/40'
+                      }`}
+                    >
+                      <div className={`text-sm font-medium ${active ? 'text-primary' : 'text-foreground'}`}>{s.name}</div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">{s.desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="mt-4">
+              <label className="block text-xs font-medium text-muted-foreground mb-2">Cover Layout</label>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'full_bleed', name: 'Full Bleed', desc: 'Image fills page' },
+                  { id: 'split', name: 'Split', desc: 'Image left, text right' },
+                  { id: 'band', name: 'Band', desc: 'Image top 40%' },
+                ].map(s => {
+                  const active = (quote.coverLayout || 'full_bleed') === s.id;
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => setQuote({ ...quote, coverLayout: s.id })}
+                      className={`text-left px-3 py-2 rounded-lg border transition-colors ${
+                        active ? 'border-primary bg-primary/5' : 'border-border bg-background hover:border-muted-foreground/40'
+                      }`}
+                    >
+                      <div className={`text-sm font-medium ${active ? 'text-primary' : 'text-foreground'}`}>{s.name}</div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">{s.desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
@@ -703,6 +752,14 @@ export default function QuoteBuilderPage() {
 // ─── AI PANEL ───────────────────────────────────
 
 function AIPanel({ quote, setQuote, destinations }) {
+  const { organization } = useAuth();
+  const aiUsed = organization?.aiItineraryGenerationsUsed ?? 0;
+  const aiLimit = organization?.aiItineraryGenerationsLimit ?? 0;
+  const aiQuotaExhausted = aiLimit < 999000 && aiUsed >= aiLimit;
+  const quotaTitle = aiQuotaExhausted
+    ? `You've used all ${aiLimit} AI itinerary generations this month. Upgrade or wait until reset.`
+    : undefined;
+
   const [generatingNarratives, setGeneratingNarratives] = useState(false);
   const [suggestingRoute, setSuggestingRoute] = useState(false);
   const [routeResult, setRouteResult] = useState(null);
@@ -859,8 +916,13 @@ function AIPanel({ quote, setQuote, destinations }) {
           <p className="text-[10px] text-muted-foreground mb-2">Describe a trip and AI will draft the full itinerary using your hotels and activities</p>
 
           {!showPromptDraft ? (
-            <button onClick={() => setShowPromptDraft(true)} className="w-full px-3 py-1.5 rounded-md bg-purple-600 text-white text-xs font-medium hover:bg-purple-700 transition-colors">
-              Start Drafting
+            <button
+              onClick={() => setShowPromptDraft(true)}
+              disabled={aiQuotaExhausted}
+              title={quotaTitle}
+              className="w-full px-3 py-1.5 rounded-md bg-purple-600 text-white text-xs font-medium hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {aiQuotaExhausted ? 'Monthly AI limit reached' : 'Start Drafting'}
             </button>
           ) : (
             <div className="space-y-2">
@@ -888,8 +950,9 @@ function AIPanel({ quote, setQuote, destinations }) {
                 </div>
               </div>
               <div className="flex gap-1.5">
-                <button onClick={draftFromPrompt} disabled={drafting || !draftPrompt.trim()}
-                  className="flex-1 px-3 py-1.5 rounded-md bg-purple-600 text-white text-xs font-medium hover:bg-purple-700 disabled:opacity-50 transition-colors">
+                <button onClick={draftFromPrompt} disabled={drafting || !draftPrompt.trim() || aiQuotaExhausted}
+                  title={quotaTitle}
+                  className="flex-1 px-3 py-1.5 rounded-md bg-purple-600 text-white text-xs font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
                   {drafting ? 'Drafting...' : 'Generate Itinerary'}
                 </button>
                 <button onClick={() => setShowPromptDraft(false)} className="px-2 py-1.5 rounded-md text-xs text-muted-foreground hover:bg-muted">
@@ -903,12 +966,19 @@ function AIPanel({ quote, setQuote, destinations }) {
         {/* Generate narratives */}
         <button
           onClick={generateNarratives}
-          disabled={generatingNarratives || !quote.days?.length}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-amber-50 to-orange-50 border border-primary/30 text-sm text-primary font-medium hover:from-amber-100 hover:to-orange-100 transition-all disabled:opacity-50"
+          disabled={generatingNarratives || !quote.days?.length || aiQuotaExhausted}
+          title={quotaTitle}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-amber-50 to-orange-50 border border-primary/30 text-sm text-primary font-medium hover:from-amber-100 hover:to-orange-100 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Sparkles className="w-4 h-4" />
-          {generatingNarratives ? 'Generating...' : 'Generate Narratives'}
+          {generatingNarratives ? 'Generating...' : aiQuotaExhausted ? 'Monthly AI limit reached' : 'Generate Narratives'}
         </button>
+
+        {aiQuotaExhausted && (
+          <p className="text-[10px] text-muted-foreground text-center pt-1">
+            <a href="/settings/billing" className="text-primary underline">Upgrade your plan</a> for more AI generations
+          </p>
+        )}
 
         {/* Route suggestion */}
         <div className="pt-2 border-t border-border">
@@ -1025,6 +1095,7 @@ function ListEditor({ title, icon, items, onChange, color }) {
 
 function LineItemsEditor({ lineItems, onChange, segments, marginPercent, currency }) {
   const [editIdx, setEditIdx] = useState(null);
+  const [collapsed, setCollapsed] = useState(lineItems.length > 0);
 
   const autoGenerate = () => {
     const items = [];
@@ -1071,6 +1142,7 @@ function LineItemsEditor({ lineItems, onChange, segments, marginPercent, currenc
   const addItem = () => {
     onChange([...lineItems, { description: '', quantity: 1, unitPrice: 0, total: 0 }]);
     setEditIdx(lineItems.length);
+    setCollapsed(false);
   };
 
   const updateItem = (idx, field, value) => {
@@ -1088,19 +1160,35 @@ function LineItemsEditor({ lineItems, onChange, segments, marginPercent, currenc
     if (editIdx === idx) setEditIdx(null);
   };
 
+  const itemsTotal = lineItems.reduce((s, li) => s + (li.total || 0), 0);
+
   return (
     <div className="border-t border-border pt-3 mt-1">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-medium text-muted-foreground">Line Items</span>
         <button
-          onClick={autoGenerate}
-          className="text-[10px] text-primary hover:underline flex items-center gap-0.5"
+          type="button"
+          onClick={() => setCollapsed(c => !c)}
+          className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
         >
-          <Sparkles className="w-3 h-3" /> Auto-generate
+          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${collapsed ? '-rotate-90' : ''}`} />
+          Line Items
+          {lineItems.length > 0 && (
+            <span className="text-[10px] text-muted-foreground/70 font-normal">
+              · {lineItems.length} item{lineItems.length !== 1 ? 's' : ''} · {formatCurrency(itemsTotal, currency)}
+            </span>
+          )}
         </button>
+        {!collapsed && (
+          <button
+            onClick={autoGenerate}
+            className="text-[10px] text-primary hover:underline flex items-center gap-0.5"
+          >
+            <Sparkles className="w-3 h-3" /> Auto-generate
+          </button>
+        )}
       </div>
 
-      {lineItems.length > 0 && (
+      {!collapsed && lineItems.length > 0 && (
         <div className="space-y-1 mb-2 max-h-48 overflow-y-auto">
           {lineItems.map((item, i) => (
             <div key={i} className="group">
@@ -1156,15 +1244,17 @@ function LineItemsEditor({ lineItems, onChange, segments, marginPercent, currenc
         </div>
       )}
 
-      <button onClick={addItem} className="w-full py-1.5 rounded-md border border-dashed border-border text-[10px] text-muted-foreground hover:border-primary hover:text-primary transition-colors">
-        + Add line item
-      </button>
+      {!collapsed && (
+        <button onClick={addItem} className="w-full py-1.5 rounded-md border border-dashed border-border text-[10px] text-muted-foreground hover:border-primary hover:text-primary transition-colors">
+          + Add line item
+        </button>
+      )}
 
-      {lineItems.length > 0 && (
+      {!collapsed && lineItems.length > 0 && (
         <div className="flex justify-between mt-2 pt-2 border-t border-border">
           <span className="text-xs text-muted-foreground">Line items total</span>
           <span className="text-xs font-bold text-foreground">
-            {formatCurrency(lineItems.reduce((s, li) => s + (li.total || 0), 0), currency)}
+            {formatCurrency(itemsTotal, currency)}
           </span>
         </div>
       )}
