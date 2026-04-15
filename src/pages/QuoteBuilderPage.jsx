@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
@@ -9,7 +9,7 @@ import {
   ArrowLeft, Plus, GripVertical, Trash2, MapPin, Hotel, Ticket, FileText,
   Truck, DollarSign, Save, Send, Eye, ChevronDown, ChevronUp,
   Sparkles, X, Calendar, Users as UsersIcon, Copy, Image as ImageIcon,
-  Coffee, Sun, Sunset, Star, EyeOff,
+  Coffee, Sun, Sunset, Star, EyeOff, CheckCircle,
 } from 'lucide-react';
 
 export default function QuoteBuilderPage() {
@@ -483,6 +483,11 @@ export default function QuoteBuilderPage() {
                 className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:border-primary transition-colors resize-none"
               />
             </div>
+            <CoverImagePicker
+              coverImage={quote.coverImage}
+              days={quote.days || []}
+              onChange={(img) => setQuote({ ...quote, coverImage: img })}
+            />
             <div className="mt-4">
               <label className="block text-xs font-medium text-muted-foreground mb-2">Style</label>
               <div className="grid grid-cols-3 gap-2">
@@ -753,11 +758,14 @@ export default function QuoteBuilderPage() {
 
 function AIPanel({ quote, setQuote, destinations }) {
   const { organization } = useAuth();
-  const aiUsed = organization?.aiItineraryGenerationsUsed ?? 0;
-  const aiLimit = organization?.aiItineraryGenerationsLimit ?? 0;
-  const aiQuotaExhausted = aiLimit < 999000 && aiUsed >= aiLimit;
+  const aiUsed = organization?.aiCreditsUsed ?? 0;
+  const aiLimit = organization?.aiCreditsLimit ?? 0;
+  // Heavy AI actions (draft itinerary, generate-all-narratives) cost 10 credits.
+  // Block when fewer than 10 remain.
+  const HEAVY_COST = 10;
+  const aiQuotaExhausted = aiLimit < 1_000_000 && (aiLimit - aiUsed) < HEAVY_COST;
   const quotaTitle = aiQuotaExhausted
-    ? `You've used all ${aiLimit} AI itinerary generations this month. Upgrade or wait until reset.`
+    ? `You need ${HEAVY_COST} AI credits for this action — you have ${Math.max(0, aiLimit - aiUsed)} left this month. Upgrade or wait until reset.`
     : undefined;
 
   const [generatingNarratives, setGeneratingNarratives] = useState(false);
@@ -893,7 +901,21 @@ function AIPanel({ quote, setQuote, destinations }) {
         days: data.days || [],
       });
 
-      toast.success(`Drafted ${data.days?.length || 0}-day itinerary!`);
+      // Catalog-match feedback — tells the operator which destinations we matched from
+      // their inventory, or warns when we found nothing and they need to add partners.
+      const cat = data.catalog;
+      if (cat?.emptyCatalog) {
+        toast(`Drafted itinerary, but we couldn't match any destinations from your catalog. Add hotels or activities to include them in future drafts.`, {
+          icon: '⚠️', duration: 7000,
+        });
+      } else if (cat?.matchedDestinations?.length) {
+        toast.success(
+          `Drafted ${data.days?.length || 0}-day itinerary using ${cat.hotelsUsed} hotels and ${cat.activitiesUsed} activities from: ${cat.matchedDestinations.join(', ')}`,
+          { duration: 6000 }
+        );
+      } else {
+        toast.success(`Drafted ${data.days?.length || 0}-day itinerary!`);
+      }
       setShowPromptDraft(false);
       setDraftPrompt('');
     } catch (err) {
@@ -1089,6 +1111,145 @@ function ListEditor({ title, icon, items, onChange, color }) {
           <Plus className="w-3 h-3" />
         </button>
       </div>
+    </div>
+  );
+}
+
+function CoverImagePicker({ coverImage, days, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef();
+
+  // Collect all candidate images from the itinerary
+  const candidates = [];
+  const seen = new Set();
+  for (const d of days) {
+    for (const img of (d.images || [])) {
+      if (img?.url && !seen.has(img.url)) { seen.add(img.url); candidates.push({ ...img, source: `Day ${d.dayNumber || '?'} · ${d.location || ''}` }); }
+    }
+    for (const img of (d.hotel?.images || [])) {
+      if (img?.url && !seen.has(img.url)) { seen.add(img.url); candidates.push({ ...img, source: d.hotel?.name || 'Hotel' }); }
+    }
+  }
+
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const { data } = await api.post('/uploads/user-asset', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      onChange({ url: data.url });
+      setOpen(false);
+      toast.success('Cover image updated');
+    } catch {
+      toast.error('Upload failed');
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  return (
+    <div className="mt-4">
+      <label className="block text-xs font-medium text-muted-foreground mb-2">Cover Image</label>
+      <div className="flex items-center gap-3">
+        {coverImage?.url ? (
+          <img src={coverImage.url} alt="" className="w-24 h-16 object-cover rounded-lg border border-border" />
+        ) : (
+          <div className="w-24 h-16 rounded-lg bg-muted border border-dashed border-border flex items-center justify-center text-[10px] text-muted-foreground text-center px-1">
+            Auto from itinerary
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="px-3 py-1.5 rounded-lg bg-background border border-border text-xs font-medium hover:border-primary transition-colors"
+        >
+          {coverImage?.url ? 'Change' : 'Choose'}
+        </button>
+        {coverImage?.url && (
+          <button
+            type="button"
+            onClick={() => onChange(null)}
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      <p className="text-[10px] text-muted-foreground/70 mt-1">
+        {coverImage?.url ? 'Using selected image.' : 'Defaults to the first day or hotel image.'}
+      </p>
+
+      {open && (
+        <div
+          onClick={() => setOpen(false)}
+          className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-card rounded-xl border border-border shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col"
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+              <h3 className="text-sm font-semibold text-foreground">Choose Cover Image</h3>
+              <button onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground text-lg">✕</button>
+            </div>
+
+            <div className="px-5 py-4 border-b border-border">
+              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleUpload} />
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading}
+                className="w-full py-2.5 rounded-lg border border-dashed border-border text-xs text-muted-foreground hover:border-primary hover:text-primary transition-colors disabled:opacity-50"
+              >
+                {uploading ? 'Uploading...' : '↑ Upload a new image'}
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5">
+              {candidates.length > 0 ? (
+                <>
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-3">From your itinerary</p>
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+                    {candidates.map((img, i) => {
+                      const active = coverImage?.url === img.url;
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => { onChange({ url: img.url }); setOpen(false); }}
+                          className={`relative aspect-[4/3] rounded-lg overflow-hidden border-2 transition-all ${
+                            active ? 'border-primary ring-2 ring-primary/30' : 'border-transparent hover:border-border'
+                          }`}
+                        >
+                          <img src={img.url} alt="" className="w-full h-full object-cover" />
+                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-1.5">
+                            <p className="text-[10px] text-white truncate">{img.source}</p>
+                          </div>
+                          {active && (
+                            <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-primary flex items-center justify-center">
+                              <CheckCircle className="w-3.5 h-3.5 text-white" />
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground text-center py-8">
+                  No images in the itinerary yet. Upload one above, or add images to days/hotels first.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1601,6 +1762,28 @@ function DayImagePicker({ hotels, destinations, currentLocation, currentHotel, o
   const [url, setUrl] = useState('');
   const [uploading, setUploading] = useState(false);
 
+  const [libraryQuery, setLibraryQuery] = useState(currentLocation || '');
+  const [libraryItems, setLibraryItems] = useState([]);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+
+  const fetchLibrary = async (q) => {
+    setLibraryLoading(true);
+    try {
+      const { data } = await api.get('/library/search', { params: { q, limit: 60 } });
+      setLibraryItems(data);
+    } catch { setLibraryItems([]); }
+    finally { setLibraryLoading(false); }
+  };
+
+  useEffect(() => {
+    if (tab === 'library' && libraryItems.length === 0) fetchLibrary(libraryQuery);
+  }, [tab]);
+
+  const pickLibrary = (img) => {
+    api.post(`/library/${img._id}/used`).catch(() => {});
+    onPick({ url: img.url, source: 'library', caption: img.caption, credit: img.credit, creditUrl: img.sourceUrl });
+  };
+
   const handleUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -1642,6 +1825,7 @@ function DayImagePicker({ hotels, destinations, currentLocation, currentHotel, o
             { id: 'upload', label: 'Upload' },
             { id: 'destination', label: `Destination${destImages.length ? ` (${destImages.length})` : ''}` },
             { id: 'hotels', label: `Hotels${hotelImages.length ? ` (${hotelImages.length})` : ''}` },
+            { id: 'library', label: 'Library' },
             { id: 'url', label: 'URL' },
           ].map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
@@ -1697,6 +1881,45 @@ function DayImagePicker({ hotels, destinations, currentLocation, currentHotel, o
                 ))}
               </div>
             )
+          )}
+
+          {tab === 'library' && (
+            <div className="space-y-3">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={libraryQuery}
+                  onChange={e => setLibraryQuery(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && fetchLibrary(libraryQuery)}
+                  placeholder="Search by tag (e.g. nairobi, beach, safari)"
+                  className="flex-1 px-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:border-primary"
+                />
+                <button onClick={() => fetchLibrary(libraryQuery)} className="px-3 py-2 rounded-lg bg-primary text-white text-xs font-medium">
+                  Search
+                </button>
+              </div>
+              {libraryLoading ? (
+                <div className="flex justify-center py-8"><div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>
+              ) : libraryItems.length === 0 ? (
+                <div className="text-center py-8 text-sm text-muted-foreground/70">
+                  No library images found{libraryQuery ? ` for "${libraryQuery}"` : ''}.
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-2">
+                  {libraryItems.map(img => (
+                    <button key={img._id} onClick={() => pickLibrary(img)} title={img.credit || img.caption || ''}
+                      className="aspect-square rounded-lg overflow-hidden border border-border hover:border-primary transition-colors relative group">
+                      <img src={img.url} alt="" className="w-full h-full object-cover" />
+                      {img.credit && (
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[8px] px-1 py-0.5 truncate opacity-0 group-hover:opacity-100">
+                          {img.credit}
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
 
           {tab === 'url' && (

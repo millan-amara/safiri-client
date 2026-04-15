@@ -133,6 +133,16 @@ export default function DashboardPage() {
                 data={[...stats.pipelineStats].sort((a, b) => {
                   const order = ['New Inquiry', 'Qualified', 'Proposal Sent', 'Negotiation', 'Won', 'Lost'];
                   return order.indexOf(a._id) - order.indexOf(b._id);
+                }).map((entry) => {
+                  const stageColors = {
+                    'New Inquiry': 'hsl(222 25% 12%)',
+                    'Qualified': 'hsl(222 22% 26%)',
+                    'Proposal Sent': 'hsl(222 18% 40%)',
+                    'Negotiation': 'hsl(220 12% 54%)',
+                    'Won': 'hsl(243 75% 59%)',
+                    'Lost': 'hsl(0 78% 57%)',
+                  };
+                  return { ...entry, fill: stageColors[entry._id] || 'hsl(222 25% 12%)' };
                 })}
                 margin={{ top: 10, right: 10, left: 0, bottom: 10 }}
                 barSize={48}
@@ -152,6 +162,7 @@ export default function DashboardPage() {
                   axisLine={false}
                   tickLine={false}
                   dx={-8}
+                  allowDecimals={false}
                 />
                 <Tooltip
                   cursor={{ fill: 'hsl(220 16% 96%)' }}
@@ -164,21 +175,8 @@ export default function DashboardPage() {
                   }}
                   formatter={(value) => [`${value} deals`, 'Count']}
                 />
-                <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                  {stats.pipelineStats.map((entry, index) => {
-                    // Graduated neutrals for non-terminal stages; primary for Won; destructive for Lost
-                    const name = entry._id;
-                    let fill = 'hsl(222 25% 12%)'; // default near-black
-                    if (name === 'Won') fill = 'hsl(243 75% 59%)';
-                    else if (name === 'Lost') fill = 'hsl(0 78% 57%)';
-                    else {
-                      // Gradient of neutrals for the others
-                      const neutrals = ['hsl(222 25% 12%)', 'hsl(222 22% 26%)', 'hsl(222 18% 40%)', 'hsl(220 12% 54%)'];
-                      fill = neutrals[index % neutrals.length];
-                    }
-                    return <Cell key={index} fill={fill} />;
-                  })}
-                </Bar>
+                <Bar dataKey="count" radius={[4, 4, 0, 0]} />
+
               </BarChart>
             </ResponsiveContainer>
           ) : (

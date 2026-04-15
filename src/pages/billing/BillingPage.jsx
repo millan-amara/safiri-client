@@ -1,28 +1,29 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../utils/api';
 import toast from 'react-hot-toast';
 import {
-  CreditCard, Zap, Users, Sparkles, CheckCircle2, AlertCircle,
-  Clock, FileText, RefreshCw, ExternalLink, XCircle,
+  CreditCard, Sparkles, CheckCircle2, Clock, FileText, RefreshCw,
 } from 'lucide-react';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatKes(kobo) {
-  return new Intl.NumberFormat('en-KE', {
-    style: 'currency', currency: 'KES', minimumFractionDigits: 0,
-  }).format(kobo / 100);
-}
+// Sentinel for "unlimited" — must match server/config/plans.js UNLIMITED.
+const UNLIMITED_THRESHOLD = 1_000_000;
+const isUnlimited = (n) => typeof n === 'number' && n >= UNLIMITED_THRESHOLD;
+
+const fmtKes = (kes) => new Intl.NumberFormat('en-KE', {
+  style: 'currency', currency: 'KES', minimumFractionDigits: 0,
+}).format(kes);
+
+const planLabel = (key) => key.charAt(0).toUpperCase() + key.slice(1);
 
 function StatusBadge({ status }) {
   const styles = {
-    trialing:  'bg-amber-100 text-amber-800',
-    active:    'bg-green-100 text-green-800',
-    past_due:  'bg-orange-100 text-orange-800',
-    cancelled: 'bg-slate-100 text-slate-700',
-    expired:   'bg-red-100 text-red-700',
+    trialing: 'bg-amber-100 text-amber-800', active: 'bg-green-100 text-green-800',
+    past_due: 'bg-orange-100 text-orange-800', cancelled: 'bg-slate-100 text-slate-700',
+    expired: 'bg-red-100 text-red-700',
   };
   const labels = {
     trialing: 'Trial', active: 'Active', past_due: 'Payment overdue',
@@ -37,9 +38,8 @@ function StatusBadge({ status }) {
 
 function PlanBadge({ plan }) {
   const styles = {
-    trial:      'bg-amber-100 text-amber-800',
-    pro:        'bg-blue-100 text-blue-800',
-    business:   'bg-purple-100 text-purple-800',
+    trial: 'bg-amber-100 text-amber-800', starter: 'bg-sky-100 text-sky-800',
+    pro: 'bg-blue-100 text-blue-800', business: 'bg-purple-100 text-purple-800',
     enterprise: 'bg-slate-800 text-white',
   };
   return (
@@ -50,28 +50,28 @@ function PlanBadge({ plan }) {
 }
 
 function UsageBar({ used, limit, label, resetAt }) {
-  const pct = limit >= 999000 ? 0 : Math.min(100, Math.round((used / limit) * 100));
-  const isUnlimited = limit >= 999000;
-  const isWarning = !isUnlimited && pct >= 80;
-  const isDanger  = !isUnlimited && pct >= 100;
+  const unlimited = isUnlimited(limit);
+  const pct = unlimited ? 0 : Math.min(100, Math.round(((used || 0) / limit) * 100));
+  const warn = !unlimited && pct >= 80;
+  const danger = !unlimited && pct >= 100;
 
   return (
     <div>
       <div className="flex items-center justify-between text-xs mb-1.5">
         <span className="text-muted-foreground font-medium">{label}</span>
-        <span className={`font-semibold ${isDanger ? 'text-red-600' : isWarning ? 'text-orange-600' : 'text-foreground'}`}>
-          {isUnlimited ? '∞ unlimited' : `${used} / ${limit}`}
+        <span className={`font-semibold ${danger ? 'text-red-600' : warn ? 'text-orange-600' : 'text-foreground'}`}>
+          {unlimited ? '∞ unlimited' : `${used || 0} / ${limit}`}
         </span>
       </div>
-      {!isUnlimited && (
+      {!unlimited && (
         <div className="h-1.5 bg-muted rounded-full overflow-hidden">
           <div
-            className={`h-full rounded-full transition-all ${isDanger ? 'bg-red-500' : isWarning ? 'bg-orange-400' : 'bg-primary'}`}
+            className={`h-full rounded-full transition-all ${danger ? 'bg-red-500' : warn ? 'bg-orange-400' : 'bg-primary'}`}
             style={{ width: `${pct}%` }}
           />
         </div>
       )}
-      {resetAt && !isUnlimited && (
+      {resetAt && !unlimited && (
         <p className="text-[11px] text-muted-foreground mt-1">
           Resets {new Date(resetAt).toLocaleDateString('en-KE', { day: 'numeric', month: 'long' })}
         </p>
@@ -80,77 +80,69 @@ function UsageBar({ used, limit, label, resetAt }) {
   );
 }
 
-// ─── Plan cards ───────────────────────────────────────────────────────────────
+// Build the bullet list shown on each plan card from the catalog entry.
+function planFeatures(p) {
+  const seats = isUnlimited(p.seats) ? 'Unlimited team members' : `Up to ${p.seats} team members`;
+  const quotes = isUnlimited(p.quotesPerMonth) ? 'Unlimited quotes' : `${p.quotesPerMonth} quotes / month`;
+  const credits = `${p.aiCredits.toLocaleString()} AI credits / month`;
+  const features = [seats, quotes, credits];
 
-const PLANS = [
-  {
-    key: 'pro',
-    name: 'Pro',
-    priceKobo: 499900,
-    period: '/month',
-    tagline: 'For growing safari businesses',
-    features: [
-      'Up to 6 team members',
-      'Unlimited contacts, deals & quotes',
-      '20 AI itinerary generations / month',
-      'AI deal summaries & email drafts',
-      'WhatsApp workflow notifications',
-    ],
-  },
-  {
-    key: 'business',
-    name: 'Business',
-    priceKobo: 1299900,
-    period: '/month',
-    tagline: 'For established operators',
-    features: [
-      'Unlimited team members',
-      'Everything in Pro',
-      'Unlimited AI itinerary generations',
-      'White-label quote share pages',
-      'API access (coming soon)',
-    ],
-    highlighted: true,
-  },
-];
+  const caps = p.partnerCaps || {};
+  const hotelsCap = isUnlimited(caps.hotel) ? 'Unlimited' : caps.hotel;
+  const actsCap   = isUnlimited(caps.activity) ? 'Unlimited' : caps.activity;
+  features.push(`${hotelsCap} hotels · ${actsCap} activities`);
+  if (!isUnlimited(p.maxImagesPerRecord)) features.push(`${p.maxImagesPerRecord} images per record`);
+  if (p.pipelines && !isUnlimited(p.pipelines)) features.push(`${p.pipelines} pipeline${p.pipelines === 1 ? '' : 's'}`);
+  else if (isUnlimited(p.pipelines)) features.push('Unlimited pipelines');
+  if (p.csvImportRows && !isUnlimited(p.csvImportRows)) features.push(`CSV imports up to ${p.csvImportRows.toLocaleString()} rows`);
+
+  if (p.whiteLabel) features.push('White-label quote share pages');
+  features.push(p.whatsapp ? 'WhatsApp notifications' : 'Email notifications');
+  if (p.webhooks) features.push('Webhooks (Zapier, n8n)');
+  if (p.customPdfPresets) features.push('Custom PDF presets');
+  return features;
+}
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function BillingPage() {
   const { refreshOrganization } = useAuth();
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [billing, setBilling] = useState(null);
+  const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [upgrading, setUpgrading] = useState(null); // plan key being checked out
+  const [annual, setAnnual] = useState(false);
+  const [upgrading, setUpgrading] = useState(null);
   const [cancelling, setCancelling] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
 
-  const fetchBilling = useCallback(async () => {
+  const fetchAll = useCallback(async () => {
     try {
-      const { data } = await api.get('/billing/status');
-      setBilling(data);
-    } catch (err) {
+      const [{ data: billingData }, { data: plansData }] = await Promise.all([
+        api.get('/billing/status'),
+        api.get('/billing/plans'),
+      ]);
+      setBilling(billingData);
+      setPlans(plansData.plans || []);
+    } catch {
       toast.error('Could not load billing information.');
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    fetchBilling();
-  }, [fetchBilling]);
+  useEffect(() => { fetchAll(); }, [fetchAll]);
 
   // Handle post-payment redirect params
   useEffect(() => {
     const success = searchParams.get('success');
-    const plan    = searchParams.get('plan');
-    const error   = searchParams.get('error');
+    const planParam = searchParams.get('plan');
+    const error = searchParams.get('error');
 
     if (success === 'true') {
-      toast.success(plan ? `Upgraded to ${plan.charAt(0).toUpperCase() + plan.slice(1)}! Welcome aboard.` : 'Payment successful!');
-      fetchBilling();
+      toast.success(planParam ? `Upgraded to ${planLabel(planParam)}! Welcome aboard.` : 'Payment successful!');
+      fetchAll();
       refreshOrganization();
     }
     if (error) {
@@ -161,16 +153,43 @@ export default function BillingPage() {
       };
       toast.error(msgs[error] || 'Payment error. Please try again.');
     }
+    if (success || error) setSearchParams({}, { replace: true });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleUpgrade = async (planKey) => {
     setUpgrading(planKey);
     try {
-      const { data } = await api.post('/billing/checkout', { plan: planKey });
+      const { data } = await api.post('/billing/checkout', { plan: planKey, annual });
       window.location.href = data.authorizationUrl;
     } catch (err) {
       toast.error(err.response?.data?.message || 'Could not start checkout. Please try again.');
       setUpgrading(null);
+    }
+  };
+
+  const handleScheduleDowngrade = async (planKey) => {
+    if (!window.confirm(`Schedule a downgrade to ${planLabel(planKey)}? You'll keep your current plan until the end of this billing period, then move automatically.`)) return;
+    setUpgrading(planKey);
+    try {
+      const { data } = await api.post('/billing/schedule-downgrade', { plan: planKey });
+      toast.success(data.message);
+      fetchAll();
+      refreshOrganization();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not schedule downgrade.');
+    } finally {
+      setUpgrading(null);
+    }
+  };
+
+  const handleCancelDowngrade = async () => {
+    try {
+      const { data } = await api.post('/billing/cancel-downgrade');
+      toast.success(data.message);
+      fetchAll();
+      refreshOrganization();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not cancel downgrade.');
     }
   };
 
@@ -180,7 +199,7 @@ export default function BillingPage() {
       const { data } = await api.post('/billing/cancel');
       toast.success(data.message);
       setConfirmCancel(false);
-      fetchBilling();
+      fetchAll();
       refreshOrganization();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Cancellation failed. Please try again.');
@@ -201,24 +220,25 @@ export default function BillingPage() {
     return (
       <div className="text-center py-16">
         <p className="text-muted-foreground text-sm">Could not load billing information.</p>
-        <button onClick={fetchBilling} className="mt-3 text-sm text-primary underline">Retry</button>
+        <button onClick={fetchAll} className="mt-3 text-sm text-primary underline">Retry</button>
       </div>
     );
   }
 
   const {
-    subscriptionStatus, plan, trialEndsAt, trialDaysLeft, trialQuotesLeft,
-    trialQuoteCount, trialQuoteLimit, currentPeriodEnd,
-    aiItineraryGenerationsUsed, aiItineraryGenerationsLimit, aiCreditsResetAt,
-    paystackSubscriptionCode,
+    subscriptionStatus, plan, trialDaysLeft, trialQuotesLeft, currentPeriodEnd,
+    aiCreditsUsed, aiCreditsLimit, aiCreditsResetAt,
+    paystackSubscriptionCode, pendingPlan,
   } = billing;
 
-  const isPaidPlan = plan === 'pro' || plan === 'business';
-  const canCancel  = isPaidPlan && paystackSubscriptionCode && subscriptionStatus === 'active';
+  const selfServePlans = plans.filter((p) => p.selfServe);
+  const currentPlanRow = plans.find((p) => p.key === plan);
+  const currentPriceKes = currentPlanRow?.monthlyPriceKES ?? 0;
+  const isPaidPlan = ['starter', 'pro', 'business'].includes(plan);
+  const canCancel = isPaidPlan && paystackSubscriptionCode && subscriptionStatus === 'active';
 
   return (
-    <div className="space-y-8 animate-fade-in max-w-2xl">
-      {/* Header */}
+    <div className="space-y-8 animate-fade-in max-w-3xl">
       <div>
         <h1 className="text-2xl font-bold text-foreground" style={{ fontFamily: 'Playfair Display, serif' }}>
           Billing &amp; Subscription
@@ -234,6 +254,7 @@ export default function BillingPage() {
             <div className="flex items-center gap-2">
               <PlanBadge plan={plan} />
               <StatusBadge status={subscriptionStatus} />
+              {billing.annual && <span className="text-[10px] uppercase font-bold text-green-700 bg-green-50 px-1.5 py-0.5 rounded">Annual</span>}
             </div>
           </div>
           {isPaidPlan && currentPeriodEnd && (
@@ -248,7 +269,6 @@ export default function BillingPage() {
           )}
         </div>
 
-        {/* Trial countdown */}
         {plan === 'trial' && subscriptionStatus === 'trialing' && (
           <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border">
             <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
@@ -268,18 +288,38 @@ export default function BillingPage() {
           </div>
         )}
 
-        {/* AI usage */}
         <div className="pt-2 border-t border-border">
           <UsageBar
-            used={aiItineraryGenerationsUsed}
-            limit={aiItineraryGenerationsLimit}
-            label="AI itinerary generations this month"
+            used={aiCreditsUsed}
+            limit={aiCreditsLimit}
+            label="AI credits this month (heavy=10 · medium=3 · light=1)"
             resetAt={aiCreditsResetAt}
           />
         </div>
 
-        {/* Cancel link */}
-        {canCancel && !confirmCancel && (
+        {pendingPlan && (
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
+            <Clock className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1 text-xs">
+              <p className="font-semibold text-amber-900">Scheduled downgrade to {planLabel(pendingPlan)}</p>
+              <p className="text-amber-800 mt-0.5">
+                You'll keep {planLabel(plan)} access until{' '}
+                {currentPeriodEnd
+                  ? new Date(currentPeriodEnd).toLocaleDateString('en-KE', { day: 'numeric', month: 'long', year: 'numeric' })
+                  : 'period end'}
+                , then switch to {planLabel(pendingPlan)} automatically.
+              </p>
+              <button
+                onClick={handleCancelDowngrade}
+                className="mt-1.5 text-amber-900 underline font-medium hover:text-amber-700"
+              >
+                Cancel scheduled downgrade
+              </button>
+            </div>
+          </div>
+        )}
+
+        {canCancel && !confirmCancel && !pendingPlan && (
           <div className="pt-1">
             <button
               onClick={() => setConfirmCancel(true)}
@@ -290,7 +330,6 @@ export default function BillingPage() {
           </div>
         )}
 
-        {/* Cancel confirmation */}
         {confirmCancel && (
           <div className="p-4 bg-red-50 border border-red-200 rounded-lg space-y-3">
             <p className="text-sm font-semibold text-red-900">Cancel your subscription?</p>
@@ -320,65 +359,94 @@ export default function BillingPage() {
         )}
       </div>
 
-      {/* Upgrade plans */}
-      {plan !== 'enterprise' && (
+      {/* Plan picker */}
+      {plan !== 'enterprise' && !pendingPlan && (
         <div>
-          <h2 className="text-base font-semibold text-foreground mb-4">
-            {isPaidPlan ? 'Change plan' : 'Upgrade your plan'}
-          </h2>
-          <div className="grid gap-4 sm:grid-cols-2">
-            {PLANS.filter((p) => p.key !== plan).map((p) => (
-              <div
-                key={p.key}
-                className={`relative bg-card border rounded-xl p-5 flex flex-col gap-4 ${
-                  p.highlighted ? 'border-primary shadow-sm' : 'border-border'
-                }`}
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold text-foreground">
+              {isPaidPlan ? 'Change plan' : 'Choose your plan'}
+            </h2>
+            <div className="inline-flex items-center bg-muted rounded-lg p-0.5 text-xs">
+              <button
+                onClick={() => setAnnual(false)}
+                className={`px-3 py-1 rounded-md font-medium transition-colors ${!annual ? 'bg-card shadow-sm text-foreground' : 'text-muted-foreground'}`}
               >
-                {p.highlighted && (
-                  <span className="absolute -top-2.5 left-4 px-2.5 py-0.5 bg-primary text-white text-[10px] font-bold uppercase tracking-wide rounded-full">
-                    Most popular
-                  </span>
-                )}
+                Monthly
+              </button>
+              <button
+                onClick={() => setAnnual(true)}
+                className={`px-3 py-1 rounded-md font-medium transition-colors ${annual ? 'bg-card shadow-sm text-foreground' : 'text-muted-foreground'}`}
+              >
+                Annual <span className="text-green-600 font-bold">·2 months free</span>
+              </button>
+            </div>
+          </div>
 
-                <div>
-                  <p className="font-semibold text-foreground">{p.name}</p>
-                  <p className="text-xs text-muted-foreground">{p.tagline}</p>
-                  <p className="mt-2 text-2xl font-bold text-foreground">
-                    {formatKes(p.priceKobo)}
-                    <span className="text-sm font-normal text-muted-foreground">{p.period}</span>
-                  </p>
-                </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            {selfServePlans.filter((p) => p.key !== plan).map((p) => {
+              const isDowngrade = p.monthlyPriceKES < currentPriceKes;
+              const actionLabel = isDowngrade ? 'Downgrade to' : 'Upgrade to';
+              const price = annual ? p.annualPriceKES : p.monthlyPriceKES;
+              const period = annual ? '/year' : '/month';
+              const highlighted = p.key === 'pro';
 
-                <ul className="space-y-1.5 flex-1">
-                  {p.features.map((f) => (
-                    <li key={f} className="flex items-start gap-2 text-xs text-muted-foreground">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-green-500 flex-shrink-0 mt-0.5" />
-                      {f}
-                    </li>
-                  ))}
-                </ul>
-
-                <button
-                  onClick={() => handleUpgrade(p.key)}
-                  disabled={upgrading === p.key}
-                  className={`w-full py-2 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-60 ${
-                    p.highlighted
-                      ? 'bg-primary hover:bg-primary/90 text-white'
-                      : 'bg-muted hover:bg-muted/80 text-foreground'
+              return (
+                <div
+                  key={p.key}
+                  className={`relative bg-card border rounded-xl p-5 flex flex-col gap-4 ${
+                    highlighted ? 'border-primary shadow-sm' : 'border-border'
                   }`}
                 >
-                  {upgrading === p.key ? (
-                    <><RefreshCw className="w-4 h-4 animate-spin" /> Redirecting…</>
-                  ) : (
-                    <><CreditCard className="w-4 h-4" /> Upgrade to {p.name}</>
+                  {highlighted && (
+                    <span className="absolute -top-2.5 left-4 px-2.5 py-0.5 bg-primary text-white text-[10px] font-bold uppercase tracking-wide rounded-full">
+                      Most popular
+                    </span>
                   )}
-                </button>
-              </div>
-            ))}
+
+                  <div>
+                    <p className="font-semibold text-foreground">{p.label}</p>
+                    <p className="mt-2 text-2xl font-bold text-foreground">
+                      {fmtKes(price)}
+                      <span className="text-sm font-normal text-muted-foreground">{period}</span>
+                    </p>
+                    {annual && (
+                      <p className="text-[11px] text-green-700 font-medium mt-0.5">
+                        Saves {fmtKes(p.monthlyPriceKES * 2)} vs monthly
+                      </p>
+                    )}
+                  </div>
+
+                  <ul className="space-y-1.5 flex-1">
+                    {planFeatures(p).map((f) => (
+                      <li key={f} className="flex items-start gap-2 text-xs text-muted-foreground">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-green-500 flex-shrink-0 mt-0.5" />
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+
+                  <button
+                    onClick={() => (isDowngrade ? handleScheduleDowngrade(p.key) : handleUpgrade(p.key))}
+                    disabled={upgrading === p.key}
+                    className={`w-full py-2 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-60 ${
+                      highlighted
+                        ? 'bg-primary hover:bg-primary/90 text-white'
+                        : 'bg-muted hover:bg-muted/80 text-foreground'
+                    }`}
+                  >
+                    {upgrading === p.key ? (
+                      <><RefreshCw className="w-4 h-4 animate-spin" /> Redirecting…</>
+                    ) : (
+                      <><CreditCard className="w-4 h-4" /> {actionLabel} {p.label}</>
+                    )}
+                  </button>
+                </div>
+              );
+            })}
           </div>
 
           <p className="text-xs text-muted-foreground mt-3 text-center">
-            Payments processed securely by Paystack · No hidden fees · Cancel anytime
+            Need more? <a href="mailto:sales@safiripro.com" className="underline text-primary">Talk to sales about Enterprise</a> · Payments via Paystack · Cancel anytime
           </p>
         </div>
       )}

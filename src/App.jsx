@@ -19,6 +19,7 @@ import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
 import BillingPage from './pages/billing/BillingPage';
+import LibraryAdminPage from './pages/LibraryAdminPage';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -61,6 +62,7 @@ export default function App() {
         <Route path="automations" element={<AutomationsPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="settings/billing" element={<BillingPage />} />
+        <Route path="admin/library" element={<LibraryAdminPage />} />
       </Route>
     </Routes>
   );

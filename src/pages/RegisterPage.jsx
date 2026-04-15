@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Compass } from 'lucide-react';
+import { Compass, Eye, EyeOff } from 'lucide-react';
 import toast from 'react-hot-toast';
 import PhoneInput from '../components/shared/PhoneInput';
 
 export default function RegisterPage() {
   const [form, setForm] = useState({ name: '', email: '', password: '', companyName: '', phone: '' });
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const { register } = useAuth();
   const navigate = useNavigate();
 
@@ -79,15 +80,25 @@ export default function RegisterPage() {
 
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1.5">Password</label>
-            <input
-              type="password"
-              value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              className="w-full px-3.5 py-2.5 rounded-lg bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-colors"
-              placeholder="Min 6 characters"
-              minLength={6}
-              required
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                className="w-full px-3.5 py-2.5 pr-10 rounded-lg bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-colors"
+                placeholder="Min 6 characters"
+                minLength={6}
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(s => !s)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
 
           <div>

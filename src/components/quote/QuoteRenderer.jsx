@@ -430,6 +430,13 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                           >
                             <img src={day.heroImage.url} alt={day.destination} className="w-full h-48 object-cover block transition-transform duration-500 group-hover:scale-[1.02]" />
                           </button>
+                          {day.heroImage.credit && (
+                            <p className="text-[10px] text-stone-400 italic mb-3 -mt-2">
+                              {day.heroImage.creditUrl ? (
+                                <a href={day.heroImage.creditUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">{day.heroImage.credit}</a>
+                              ) : day.heroImage.credit}
+                            </p>
+                          )}
                           {day.images.length > 1 && (
                             <div className="grid grid-cols-6 gap-1.5 mb-5">
                               {day.images.slice(1, 7).map((img, gi) => (
@@ -795,6 +802,13 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
             />
             {lightbox.images[lightbox.index]?.caption && (
               <p className="mt-4 text-sm text-white/80 text-center max-w-2xl">{lightbox.images[lightbox.index].caption}</p>
+            )}
+            {lightbox.images[lightbox.index]?.credit && (
+              <p className="mt-1 text-[11px] text-white/50 italic text-center">
+                {lightbox.images[lightbox.index].creditUrl ? (
+                  <a href={lightbox.images[lightbox.index].creditUrl} target="_blank" rel="noopener noreferrer" className="hover:text-white/80 underline">{lightbox.images[lightbox.index].credit}</a>
+                ) : lightbox.images[lightbox.index].credit}
+              </p>
             )}
             <p className="mt-2 text-xs text-white/50">{lightbox.index + 1} / {lightbox.images.length}</p>
           </div>

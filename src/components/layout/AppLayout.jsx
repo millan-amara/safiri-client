@@ -19,6 +19,7 @@ import {
   X,
   MapPin,
   Zap,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -29,6 +30,7 @@ const navItems = [
   { path: '/crm', icon: Users, label: 'CRM' },
   { path: '/quotes', icon: FileText, label: 'Quotes' },
   { path: '/automations', icon: Zap, label: 'Automations' },
+  { path: '/admin/library', icon: ImageIcon, label: 'Image Library', superAdminOnly: true },
   { path: '/settings', icon: Settings, label: 'Settings' },
 ];
 
@@ -81,7 +83,7 @@ export default function AppLayout() {
 
         {/* Nav */}
         <nav className="flex-1 py-4 px-3 space-y-1">
-          {navItems.map(({ path, icon: Icon, label, end }) => (
+          {navItems.filter(item => !item.superAdminOnly || user?.isSuperAdmin).map(({ path, icon: Icon, label, end }) => (
             <NavLink
               key={path}
               to={path}
