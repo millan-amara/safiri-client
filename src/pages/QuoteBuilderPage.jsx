@@ -310,7 +310,7 @@ export default function QuoteBuilderPage() {
                 <Eye className="w-4 h-4" /> Share Link
               </button>
               <a
-                href={`/api/pdf/${id}/pdf/download?token=${localStorage.getItem('token')}`}
+                href={`${import.meta.env.VITE_API_URL || '/api'}/pdf/${id}/pdf/download?token=${localStorage.getItem('token')}`}
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm font-medium text-muted-foreground hover:border-border transition-colors"
               >
