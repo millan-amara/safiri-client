@@ -106,14 +106,14 @@ export default function LoginPage() {
             </button>
           </form>
 
-          {/* Divider */}
+          {/* Google sign-in temporarily disabled — pending Google OAuth app approval for production */}
+          {/*
           <div className="flex items-center gap-3 my-5">
             <div className="flex-1 h-px bg-muted" />
             <span className="text-xs text-muted-foreground/70">or</span>
             <div className="flex-1 h-px bg-muted" />
           </div>
 
-          {/* Google OAuth */}
           <a
             href="/api/auth/google"
             className="w-full flex items-center justify-center gap-2.5 py-2.5 rounded-lg bg-card border border-border text-sm font-medium text-foreground hover:bg-background hover:border-border transition-colors"
@@ -126,6 +126,7 @@ export default function LoginPage() {
             </svg>
             Continue with Google
           </a>
+          */}
 
           <div className="mt-6 text-center">
             <p className="text-sm text-muted-foreground">
