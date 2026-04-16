@@ -9,7 +9,8 @@ export default function QuoteSharePage() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetch(`/api/quotes/share/${token}`)
+    const apiBase = import.meta.env.VITE_API_URL || '/api';
+    fetch(`${apiBase}/quotes/share/${token}`)
       .then(r => { if (!r.ok) throw new Error(r.status === 410 ? 'expired' : 'not_found'); return r.json(); })
       .then(setQuote)
       .catch(e => setError(e.message))
@@ -19,7 +20,7 @@ export default function QuoteSharePage() {
     const start = Date.now();
     return () => {
       const duration = Math.round((Date.now() - start) / 1000);
-      navigator.sendBeacon?.(`/api/quotes/share/${token}/duration`, JSON.stringify({ duration }));
+      navigator.sendBeacon?.(`${apiBase}/quotes/share/${token}/duration`, JSON.stringify({ duration }));
     };
   }, [token]);
 

@@ -998,10 +998,12 @@ function ClientResponseSection({ token, quoteStatus, primaryColor, headingStyle 
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
+  const apiBase = import.meta.env.VITE_API_URL || '/api';
+
   const handleAccept = async () => {
     setSubmitting(true);
     try {
-      await fetch(`/api/quotes/share/${token}/accept`, { method: 'POST' });
+      await fetch(`${apiBase}/quotes/share/${token}/accept`, { method: 'POST' });
       setSubmitted(true);
       setMode('accepted');
     } catch {
@@ -1016,7 +1018,7 @@ function ClientResponseSection({ token, quoteStatus, primaryColor, headingStyle 
     if (!message.trim()) return;
     setSubmitting(true);
     try {
-      await fetch(`/api/quotes/share/${token}/request-changes`, {
+      await fetch(`${apiBase}/quotes/share/${token}/request-changes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message, clientName, clientEmail }),
