@@ -123,7 +123,7 @@ export default function LibraryAdminPage() {
             {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
           <input placeholder="Caption" value={form.caption} onChange={e => setForm({ ...form, caption: e.target.value })} className={inputCls} />
-          <input placeholder="Credit — paste Unsplash &quot;Copy credit&quot; snippet or plain text" value={form.credit} onChange={e => setForm({ ...form, credit: e.target.value })} className={inputCls} />
+          <input placeholder="Credit — e.g. “Photo by Jane Doe on Pexels” (or paste Unsplash snippet)" value={form.credit} onChange={e => setForm({ ...form, credit: e.target.value })} className={inputCls} />
           <input placeholder="Source URL (link to original)" value={form.sourceUrl} onChange={e => setForm({ ...form, sourceUrl: e.target.value })} className={`${inputCls} md:col-span-2`} />
         </div>
 
