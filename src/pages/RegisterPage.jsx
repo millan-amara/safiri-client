@@ -27,19 +27,19 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-8">
+    <div className="min-h-screen flex items-center justify-center bg-background p-4 sm:p-8">
       <div className="w-full max-w-sm animate-slide-up">
-        <div className="flex items-center gap-2.5 mb-10">
+        <div className="flex items-center gap-2.5 mb-8 sm:mb-10">
           <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
             <Compass className="w-5 h-5 text-white" />
           </div>
           <span className="text-xl font-bold text-foreground tracking-tight">SafiriPro</span>
         </div>
 
-        <h2 className="text-2xl font-bold text-foreground mb-1" style={{ fontFamily: 'Playfair Display, serif' }}>
+        <h2 className="text-xl sm:text-2xl font-bold text-foreground mb-1" style={{ fontFamily: 'Playfair Display, serif' }}>
           Start your journey
         </h2>
-        <p className="text-sm text-muted-foreground mb-8">Create your workspace in seconds</p>
+        <p className="text-sm text-muted-foreground mb-6 sm:mb-8">Create your workspace in seconds</p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

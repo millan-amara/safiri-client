@@ -66,14 +66,14 @@ export default function QuotesPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-brand" style={{ fontFamily: 'Playfair Display, serif' }}>Quotes</h1>
-          <p className="text-sm text-sand-500 mt-0.5">{quotes.length} total quotes</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-brand" style={{ fontFamily: 'Playfair Display, serif' }}>Quotes</h1>
+          <p className="text-xs sm:text-sm text-sand-500 mt-0.5">{quotes.length} total quotes</p>
         </div>
         <Link
           to="/quotes/new"
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-brand text-white text-sm font-medium hover:bg-amber-700 transition-colors"
+          className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-amber-brand text-white text-sm font-medium hover:bg-amber-700 transition-colors self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" /> New Quote
         </Link>
@@ -184,18 +184,18 @@ export default function QuotesPage() {
               <Link
                 key={quote._id}
                 to={`/quotes/${quote._id}`}
-                className="bg-white rounded-xl border border-sand-200 p-4 hover:border-sand-300 hover:shadow-sm transition-all group flex items-center justify-between"
+                className="bg-white rounded-xl border border-sand-200 p-3 sm:p-4 hover:border-sand-300 hover:shadow-sm transition-all group flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
               >
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-lg bg-sand-100 text-sand-500 flex items-center justify-center">
+                <div className="flex items-start sm:items-center gap-3 sm:gap-4 min-w-0 flex-1">
+                  <div className="w-10 h-10 rounded-lg bg-sand-100 text-sand-500 flex items-center justify-center shrink-0">
                     <FileText className="w-5 h-5" />
                   </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-slate-brand">{quote.title}</p>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-semibold text-slate-brand truncate">{quote.title}</p>
                       <span className="text-xs text-sand-400">#{quote.quoteNumber}</span>
                     </div>
-                    <p className="text-xs text-sand-500 mt-0.5">
+                    <p className="text-xs text-sand-500 mt-0.5 line-clamp-2 sm:truncate">
                       {quote.contact ? `${quote.contact.firstName} ${quote.contact.lastName}` : 'No contact'}
                       {quote.createdBy?.name && ` · by ${quote.createdBy.name}`}
                       {quote.startDate && ` · ${formatDate(quote.startDate)}`}
@@ -203,30 +203,30 @@ export default function QuotesPage() {
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-4">
+                <div className="flex items-center justify-between sm:justify-end gap-2 sm:gap-4 shrink-0">
                   {quote.tracking?.views > 0 && (
                     <span className="text-xs text-sand-500 flex items-center gap-1">
                       <Eye className="w-3 h-3" /> {quote.tracking.views}
                     </span>
                   )}
-                  <div className="text-right">
-                    <p className="text-sm font-bold text-slate-brand">
+                  <div className="sm:text-right">
+                    <p className="text-sm font-bold text-slate-brand tabular-nums">
                       {formatCurrency(quote.pricing?.totalPrice || 0, quote.pricing?.currency)}
                     </p>
                   </div>
-                  <span className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 ${cfg.color}`}>
+                  <span className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 shrink-0 ${cfg.color}`}>
                     <StatusIcon className="w-3 h-3" /> {cfg.label}
                   </span>
                   <button
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); copyShareLink(quote.shareToken); }}
-                    className="p-1.5 rounded-md hover:bg-sand-100 text-sand-400 opacity-0 group-hover:opacity-100 transition-all"
+                    className="p-1.5 rounded-md hover:bg-sand-100 text-sand-400 sm:opacity-0 sm:group-hover:opacity-100 transition-all"
                     title="Copy share link"
                   >
                     <Copy className="w-3.5 h-3.5" />
                   </button>
                   <button
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeleteQuote(quote); }}
-                    className="p-1.5 rounded-md hover:bg-red-50 text-sand-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                    className="p-1.5 rounded-md hover:bg-red-50 text-sand-400 hover:text-red-500 sm:opacity-0 sm:group-hover:opacity-100 transition-all"
                     title="Delete quote"
                   >
                     <Trash2 className="w-3.5 h-3.5" />

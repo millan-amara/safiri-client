@@ -28,7 +28,7 @@ export default function ConfirmDialog({ title, message, confirmLabel = 'Delete',
           <h3 className="text-base font-semibold text-foreground mb-1">{title}</h3>
           <p className="text-sm text-muted-foreground leading-relaxed">{message}</p>
         </div>
-        <div className="flex gap-2 px-6 pb-6">
+        <div className="flex flex-col-reverse sm:flex-row gap-2 px-4 sm:px-6 pb-4 sm:pb-6">
           <button
             onClick={onCancel}
             className="flex-1 px-4 py-2.5 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:bg-background transition-colors"

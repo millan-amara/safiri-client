@@ -124,9 +124,9 @@ export default function ImageGallery({ entityType, entityId, images = [], onUpda
         {/* Lightbox */}
         {viewImage && (
           <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setViewImage(null)}>
-            <div className="relative max-w-2xl max-h-[80vh]" onClick={e => e.stopPropagation()}>
-              <img src={viewImage.url} alt={viewImage.caption} className="max-w-full max-h-[80vh] object-contain rounded-lg" />
-              <button onClick={() => setViewImage(null)} className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-black/70">
+            <div className="relative w-full max-w-2xl max-h-[80vh]" onClick={e => e.stopPropagation()}>
+              <img src={viewImage.url} alt={viewImage.caption} className="max-w-full max-h-[80vh] mx-auto object-contain rounded-lg" />
+              <button onClick={() => setViewImage(null)} className="absolute top-2 right-2 w-10 h-10 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-black/70">
                 <X className="w-4 h-4" />
               </button>
               {viewImage.caption && <p className="text-white text-sm text-center mt-2">{viewImage.caption}</p>}
@@ -157,19 +157,19 @@ export default function ImageGallery({ entityType, entityId, images = [], onUpda
       {showUpload && (
         <div className="p-3 rounded-lg bg-background border border-border space-y-2 animate-scale-in">
           <input type="file" ref={fileRef} onChange={handleUpload} accept="image/*" multiple className="hidden" />
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2">
             <input
               type="text"
               value={caption}
               onChange={(e) => setCaption(e.target.value)}
               placeholder="Caption (optional)"
-              className="flex-1 px-2 py-1.5 rounded-md bg-card border border-border text-xs focus:outline-none focus:border-primary"
+              className="flex-1 min-w-0 px-2 py-1.5 rounded-md bg-card border border-border text-xs focus:outline-none focus:border-primary"
             />
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
               disabled={uploading}
-              className="px-3 py-1.5 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary disabled:opacity-50"
+              className="px-3 py-1.5 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary disabled:opacity-50 shrink-0"
             >
               {uploading ? 'Uploading...' : 'Choose Files'}
             </button>
@@ -178,7 +178,7 @@ export default function ImageGallery({ entityType, entityId, images = [], onUpda
       )}
 
       {images.length > 0 ? (
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {images.map((img, i) => (
             <div key={i} className="relative group rounded-lg overflow-hidden border border-border">
               <img src={img.url} alt={img.caption || ''} className="w-full h-24 object-cover" />

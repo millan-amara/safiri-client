@@ -58,22 +58,22 @@ export default function DealDetailPage() {
       </Link>
 
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground" style={{ fontFamily: 'Playfair Display, serif' }}>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-xl sm:text-2xl font-bold text-foreground" style={{ fontFamily: 'Playfair Display, serif' }}>
             {deal.title}
           </h1>
-          <div className="flex items-center gap-3 mt-1">
+          <div className="flex items-center gap-2 sm:gap-3 mt-1 flex-wrap">
             <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-foreground">{deal.stage}</span>
             {deal.contact && (
-              <span className="text-sm text-muted-foreground">
+              <span className="text-xs sm:text-sm text-muted-foreground truncate">
                 {deal.contact.firstName} {deal.contact.lastName}
                 {deal.contact.email && ` · ${deal.contact.email}`}
               </span>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto shrink-0">
           <button
             onClick={() => setShowDeleteConfirm(true)}
             className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-lg border border-border text-sm text-muted-foreground hover:text-red-500 hover:border-red-200 transition-colors"
@@ -109,7 +109,7 @@ export default function DealDetailPage() {
         {/* Main column */}
         <div className="lg:col-span-2 space-y-4">
           {/* Quote Readiness */}
-          <div className="bg-card rounded-xl border border-border p-5">
+          <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
             <h3 className="text-sm font-semibold text-foreground mb-4">Quote Readiness</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {readiness.map(({ key, label, value, ready, icon: Icon }) => (
@@ -135,7 +135,7 @@ export default function DealDetailPage() {
           <NotesSection dealId={deal._id} notes={deal.notes || []} onUpdated={fetchDeal} />
 
           {/* Activity Timeline — auto events only */}
-          <div className="bg-card rounded-xl border border-border p-5">
+          <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
             <h3 className="text-sm font-semibold text-foreground mb-4">Activity Timeline</h3>
             {deal.activities?.length > 0 ? (
               <div className="space-y-3">
@@ -151,8 +151,8 @@ export default function DealDetailPage() {
                        act.type === 'quote_sent' ? <Send className="w-3 h-3" /> :
                        act.type === 'quote_viewed' ? <Eye className="w-3 h-3" /> : '•'}
                     </div>
-                    <div>
-                      <p className="text-sm text-foreground">{act.description}</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-foreground break-words">{act.description}</p>
                       <p className="text-xs text-muted-foreground/70">{formatDate(act.createdAt)}</p>
                     </div>
                   </div>
@@ -173,13 +173,13 @@ export default function DealDetailPage() {
           <DealInfoCard deal={deal} onUpdated={fetchDeal} />
 
           {/* Linked quotes */}
-          <div className="bg-card rounded-xl border border-border p-5">
+          <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
             <h3 className="text-sm font-semibold text-foreground mb-3">Quotes</h3>
             {deal.quotes?.length > 0 ? (
               deal.quotes.map((q) => (
                 <Link key={q._id} to={`/quotes/${q._id}`} className="block py-2 border-b border-border last:border-0 hover:bg-background -mx-2 px-2 rounded transition-colors">
-                  <p className="text-sm font-medium text-foreground">{q.title}</p>
-                  <p className="text-xs text-muted-foreground">#{q.quoteNumber} · {q.status}</p>
+                  <p className="text-sm font-medium text-foreground truncate">{q.title}</p>
+                  <p className="text-xs text-muted-foreground truncate">#{q.quoteNumber} · {q.status}</p>
                 </Link>
               ))
             ) : (
@@ -188,13 +188,13 @@ export default function DealDetailPage() {
           </div>
 
           {/* Tasks */}
-          <div className="bg-card rounded-xl border border-border p-5">
+          <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
             <h3 className="text-sm font-semibold text-foreground mb-3">Tasks</h3>
             {tasks.length > 0 ? (
               tasks.map((t) => (
                 <div key={t._id} className="flex items-center gap-2 py-2 border-b border-border last:border-0">
-                  <div className={`w-2 h-2 rounded-full ${t.status === 'done' ? 'bg-green-500' : 'bg-border'}`} />
-                  <p className={`text-sm ${t.status === 'done' ? 'text-muted-foreground/70 line-through' : 'text-foreground'}`}>{t.title}</p>
+                  <div className={`w-2 h-2 rounded-full shrink-0 ${t.status === 'done' ? 'bg-green-500' : 'bg-border'}`} />
+                  <p className={`text-sm truncate ${t.status === 'done' ? 'text-muted-foreground/70 line-through' : 'text-foreground'}`}>{t.title}</p>
                 </div>
               ))
             ) : (
@@ -263,7 +263,7 @@ function AISummaryCard({ deal }) {
   };
 
   return (
-    <div className="bg-card rounded-xl border border-border p-5">
+    <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
       <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-1.5">
         <Sparkles className="w-4 h-4 text-primary" /> AI Assistant
       </h3>
@@ -280,11 +280,11 @@ function AISummaryCard({ deal }) {
         </button>
       )}
 
-      <div className="flex gap-1.5">
-        <button onClick={() => draftEmail('follow_up')} className="flex-1 px-2 py-1.5 rounded-md border border-border text-[10px] text-muted-foreground font-medium hover:border-primary/50 transition-colors">
+      <div className="flex gap-1.5 flex-wrap">
+        <button onClick={() => draftEmail('follow_up')} className="flex-1 px-2 py-1.5 rounded-md border border-border text-[10px] text-muted-foreground font-medium hover:border-primary/50 transition-colors whitespace-nowrap">
           <Mail className="w-3 h-3 inline mr-1" />Follow-up
         </button>
-        <button onClick={() => draftEmail('quote_send')} className="flex-1 px-2 py-1.5 rounded-md border border-border text-[10px] text-muted-foreground font-medium hover:border-primary/50 transition-colors">
+        <button onClick={() => draftEmail('quote_send')} className="flex-1 px-2 py-1.5 rounded-md border border-border text-[10px] text-muted-foreground font-medium hover:border-primary/50 transition-colors whitespace-nowrap">
           <Send className="w-3 h-3 inline mr-1" />Quote Email
         </button>
       </div>
@@ -370,9 +370,9 @@ function DealInfoCard({ deal, onUpdated }) {
 
   const inputCls = 'w-full px-2 py-1.5 rounded-md bg-background border border-border text-xs focus:outline-none focus:border-primary';
   const Row = ({ label, value }) => (
-    <div className="flex justify-between py-1">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="text-foreground font-medium text-right">{value || '\u2014'}</span>
+    <div className="flex justify-between gap-2 py-1">
+      <span className="text-muted-foreground shrink-0">{label}</span>
+      <span className="text-foreground font-medium text-right truncate min-w-0">{value || '\u2014'}</span>
     </div>
   );
 
@@ -380,10 +380,10 @@ function DealInfoCard({ deal, onUpdated }) {
   const leadLabels = { website: 'Website', referral: 'Referral', repeat: 'Repeat Client', travel_agent: 'Travel Agent', social: 'Social Media', email: 'Email', phone: 'Phone', walk_in: 'Walk-in', other: 'Other' };
 
   return (
-    <div className="bg-card rounded-xl border border-border p-5">
-      <div className="flex items-center justify-between mb-3">
+    <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
+      <div className="flex items-center justify-between mb-3 gap-3">
         <h3 className="text-sm font-semibold text-foreground">Deal Info</h3>
-        <button onClick={() => editing ? handleSave() : setEditing(true)} disabled={saving} className="text-xs text-primary hover:underline flex items-center gap-1">
+        <button onClick={() => editing ? handleSave() : setEditing(true)} disabled={saving} className="text-xs text-primary hover:underline flex items-center gap-1 shrink-0">
           {editing ? <><Save className="w-3 h-3" /> {saving ? 'Saving...' : 'Save'}</> : <><Edit3 className="w-3 h-3" /> Edit</>}
         </button>
       </div>
@@ -497,11 +497,11 @@ function NotesSection({ dealId, notes, onUpdated }) {
   });
 
   return (
-    <div className="bg-card rounded-xl border border-border p-5">
+    <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
       <h3 className="text-sm font-semibold text-foreground mb-3">Notes</h3>
       <form onSubmit={handleAdd} className="flex gap-2 mb-4">
-        <input type="text" value={text} onChange={(e) => setText(e.target.value)} placeholder="Add a note..." className="flex-1 px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:border-primary transition-colors" />
-        <button type="submit" disabled={adding || !text.trim()} className="px-3 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary transition-colors disabled:opacity-50">
+        <input type="text" value={text} onChange={(e) => setText(e.target.value)} placeholder="Add a note..." className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:border-primary transition-colors" />
+        <button type="submit" disabled={adding || !text.trim()} className="px-3 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary transition-colors disabled:opacity-50 shrink-0">
           {adding ? '...' : 'Add'}
         </button>
       </form>
@@ -509,14 +509,14 @@ function NotesSection({ dealId, notes, onUpdated }) {
         <div className="space-y-2">
           {sorted.map((note, idx) => (
             <div key={note._id || `note-${idx}`} className={`p-3 rounded-lg border group ${note.isPinned ? 'border-primary/30 bg-primary/10/30' : 'border-border bg-background/50'}`}>
-              <p className="text-sm text-foreground leading-relaxed">{note.text}</p>
-              <div className="flex items-center justify-between mt-2">
-                <div className="flex items-center gap-2 text-[10px] text-muted-foreground/70">
-                  {note.createdBy?.name && <span>{note.createdBy.name}</span>}
+              <p className="text-sm text-foreground leading-relaxed break-words">{note.text}</p>
+              <div className="flex items-center justify-between mt-2 gap-2 flex-wrap">
+                <div className="flex items-center gap-2 text-[10px] text-muted-foreground/70 flex-wrap min-w-0">
+                  {note.createdBy?.name && <span className="truncate">{note.createdBy.name}</span>}
                   <span>{formatDate(note.createdAt)}</span>
                   {note.isPinned && <span className="text-primary font-medium">Pinned</span>}
                 </div>
-                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
                   <button onClick={() => handlePin(note._id)} className="text-[10px] text-muted-foreground/70 hover:text-primary px-1">{note.isPinned ? 'Unpin' : 'Pin'}</button>
                   <button onClick={() => handleDelete(note._id)} className="text-[10px] text-muted-foreground/70 hover:text-red-500 px-1">Delete</button>
                 </div>
@@ -570,8 +570,8 @@ function DealAttachments({ dealId, attachments, onUpdated }) {
   };
 
   return (
-    <div className="bg-card rounded-xl border border-border p-5">
-      <div className="flex items-center justify-between mb-3">
+    <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
+      <div className="flex items-center justify-between mb-3 gap-3">
         <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
           <Paperclip className="w-3.5 h-3.5 text-muted-foreground/70" /> Files
         </h3>
@@ -579,7 +579,7 @@ function DealAttachments({ dealId, attachments, onUpdated }) {
         <button
           onClick={() => fileRef.current?.click()}
           disabled={uploading}
-          className="text-xs text-primary hover:underline flex items-center gap-0.5 disabled:opacity-50"
+          className="text-xs text-primary hover:underline flex items-center gap-0.5 disabled:opacity-50 shrink-0"
         >
           <Upload className="w-3 h-3" /> {uploading ? 'Uploading...' : 'Upload'}
         </button>
@@ -587,15 +587,15 @@ function DealAttachments({ dealId, attachments, onUpdated }) {
       {attachments.length > 0 ? (
         <div className="space-y-1.5">
           {attachments.map((att, i) => (
-            <div key={i} className="flex items-center justify-between py-1.5 px-2 rounded-md hover:bg-background group">
-              <div className="flex items-center gap-2 min-w-0">
+            <div key={i} className="flex items-center justify-between gap-2 py-1.5 px-2 rounded-md hover:bg-background group">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
                 <FileText className="w-3.5 h-3.5 text-muted-foreground/70 flex-shrink-0" />
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <a href={att.url} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-foreground hover:text-primary truncate block">{att.name}</a>
                   <p className="text-[10px] text-muted-foreground/70">{formatDate(att.uploadedAt)}</p>
                 </div>
               </div>
-              <button onClick={() => handleDelete(att.url)} className="p-1 rounded text-muted-foreground/40 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all">
+              <button onClick={() => handleDelete(att.url)} className="p-1 rounded text-muted-foreground/40 hover:text-red-500 sm:opacity-0 sm:group-hover:opacity-100 transition-all shrink-0">
                 <Trash2 className="w-3 h-3" />
               </button>
             </div>

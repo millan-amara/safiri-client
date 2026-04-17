@@ -94,13 +94,13 @@ export default function LibraryAdminPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold text-foreground" style={{ fontFamily: 'Playfair Display, serif' }}>Image Library</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Curated stock imagery shared across all organizations</p>
+        <h1 className="text-xl sm:text-2xl font-bold text-foreground" style={{ fontFamily: 'Playfair Display, serif' }}>Image Library</h1>
+        <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Curated stock imagery shared across all organizations</p>
       </div>
 
       {/* Add form */}
-      <form onSubmit={submit} className="bg-card border border-border rounded-lg p-4 space-y-3">
-        <div className="flex gap-2 text-xs">
+      <form onSubmit={submit} className="bg-card border border-border rounded-lg p-3 sm:p-4 space-y-3">
+        <div className="flex flex-wrap gap-2 text-xs">
           <button type="button" onClick={() => setForm(f => ({ ...f, mode: 'file' }))}
             className={`px-3 py-1.5 rounded-md border ${form.mode === 'file' ? 'bg-primary text-white border-primary' : 'border-border'}`}>
             <Upload className="w-3 h-3 inline mr-1" /> Upload
@@ -117,14 +117,14 @@ export default function LibraryAdminPage() {
           <input type="url" placeholder="https://images.unsplash.com/..." value={form.url} onChange={e => setForm({ ...form, url: e.target.value })} className={inputCls} />
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <input placeholder="Tags (comma-separated, e.g. nairobi, kenya, city)" value={form.tags} onChange={e => setForm({ ...form, tags: e.target.value })} className={inputCls} />
           <select value={form.destinationType} onChange={e => setForm({ ...form, destinationType: e.target.value })} className={inputCls}>
             {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
           <input placeholder="Caption" value={form.caption} onChange={e => setForm({ ...form, caption: e.target.value })} className={inputCls} />
           <input placeholder="Credit — e.g. “Photo by Jane Doe on Pexels” (or paste Unsplash snippet)" value={form.credit} onChange={e => setForm({ ...form, credit: e.target.value })} className={inputCls} />
-          <input placeholder="Source URL (link to original)" value={form.sourceUrl} onChange={e => setForm({ ...form, sourceUrl: e.target.value })} className={`${inputCls} md:col-span-2`} />
+          <input placeholder="Source URL (link to original)" value={form.sourceUrl} onChange={e => setForm({ ...form, sourceUrl: e.target.value })} className={`${inputCls} sm:col-span-2`} />
         </div>
 
         <button type="submit" disabled={saving}
@@ -134,8 +134,8 @@ export default function LibraryAdminPage() {
       </form>
 
       {/* Filters */}
-      <div className="flex gap-2 items-center">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex flex-wrap gap-2 items-center">
+        <div className="relative flex-1 min-w-[180px] max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             placeholder="Search tags…"
@@ -145,11 +145,11 @@ export default function LibraryAdminPage() {
             className={`${inputCls} pl-8`}
           />
         </div>
-        <select value={filter.type} onChange={e => setFilter({ ...filter, type: e.target.value })} className={inputCls + ' w-auto'}>
+        <select value={filter.type} onChange={e => setFilter({ ...filter, type: e.target.value })} className={inputCls + ' w-auto shrink-0'}>
           <option value="">All types</option>
           {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
-        <button onClick={fetchItems} className="px-3 py-1.5 rounded-md border border-border text-xs">Apply</button>
+        <button onClick={fetchItems} className="px-3 py-1.5 rounded-md border border-border text-xs shrink-0">Apply</button>
       </div>
 
       {/* Grid */}

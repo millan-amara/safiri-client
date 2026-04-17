@@ -52,8 +52,8 @@ export default function ResetPasswordPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background px-4">
-        <div className="bg-card rounded-xl shadow-sm border border-border p-8 max-w-md w-full text-center">
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <div className="bg-card rounded-xl shadow-sm border border-border p-6 sm:p-8 max-w-md w-full text-center">
           <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
             <span className="text-red-500 text-lg">!</span>
           </div>
@@ -67,8 +67,8 @@ export default function ResetPasswordPage() {
 
   if (done) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background px-4">
-        <div className="bg-card rounded-xl shadow-sm border border-border p-8 max-w-md w-full text-center animate-scale-in">
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <div className="bg-card rounded-xl shadow-sm border border-border p-6 sm:p-8 max-w-md w-full text-center animate-scale-in">
           <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
             <CheckCircle className="w-6 h-6 text-green-500" />
           </div>
@@ -80,8 +80,8 @@ export default function ResetPasswordPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <div className="bg-card rounded-xl shadow-sm border border-border p-8 max-w-md w-full">
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <div className="bg-card rounded-xl shadow-sm border border-border p-6 sm:p-8 max-w-md w-full">
         <div className="text-center mb-6">
           <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center mx-auto mb-3">
             <Compass className="w-6 h-6 text-white" />

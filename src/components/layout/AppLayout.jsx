@@ -1,4 +1,4 @@
-import { Outlet, NavLink, useLocation } from 'react-router-dom';
+import { Outlet, NavLink, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { getInitials } from '../../utils/helpers';
 import api from '../../utils/api';
@@ -15,13 +15,15 @@ import {
   LogOut,
   Compass,
   ChevronRight,
-  Menu,
+  ChevronDown,
   X,
   MapPin,
   Zap,
   Image as ImageIcon,
+  MoreHorizontal,
+  User as UserIcon,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const navItems = [
   { path: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
@@ -34,29 +36,36 @@ const navItems = [
   { path: '/settings', icon: Settings, label: 'Settings' },
 ];
 
+const bottomNavPaths = ['/', '/crm', '/quotes', '/partners'];
+const bottomNavItems = [
+  { path: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
+  { path: '/crm', icon: Users, label: 'CRM' },
+  { path: '/quotes', icon: FileText, label: 'Quotes' },
+  { path: '/partners', icon: Database, label: 'Partners' },
+];
+
 export default function AppLayout() {
   const { user, organization, logout } = useAuth();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  // Derive page title from current route
+  const currentPageLabel = (() => {
+    const match = navItems.find(item =>
+      item.end ? location.pathname === item.path : location.pathname.startsWith(item.path)
+    );
+    return match?.label || '';
+  })();
 
   return (
     <div className="min-h-screen flex bg-sand-50">
-      {/* Mobile overlay */}
-      {mobileOpen && (
-        <div
-          className="fixed inset-0 bg-black/30 z-40 lg:hidden"
-          onClick={() => setMobileOpen(false)}
-        />
-      )}
-
-      {/* Sidebar */}
+      {/* Sidebar — desktop only */}
       <aside
         className={`
-          fixed lg:sticky top-0 left-0 z-50 h-screen flex flex-col
+          hidden lg:flex sticky top-0 left-0 z-50 h-screen flex-col
           bg-slate-brand text-white transition-all duration-300 ease-in-out
           ${collapsed ? 'w-[72px]' : 'w-64'}
-          ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}
       >
         {/* Logo */}
@@ -88,7 +97,6 @@ export default function AppLayout() {
               key={path}
               to={path}
               end={end}
-              onClick={() => setMobileOpen(false)}
               className={({ isActive }) => `
                 flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
                 transition-all duration-150
@@ -107,7 +115,6 @@ export default function AppLayout() {
 
         {/* User section */}
         <div className={`p-3 border-t border-white/10 ${collapsed ? 'px-2' : ''}`}>
-          {/* Notification bell */}
           <div className={`mb-2 ${collapsed ? 'flex justify-center' : ''}`}>
             <NotificationBell />
           </div>
@@ -144,26 +151,201 @@ export default function AppLayout() {
 
       {/* Main content */}
       <main className="flex-1 min-w-0">
-        {/* Mobile header */}
-        <div className="lg:hidden flex items-center h-14 px-4 bg-white border-b border-sand-200">
-          <button onClick={() => setMobileOpen(true)} className="p-2 -ml-2 text-slate-brand">
-            <Menu className="w-5 h-5" />
-          </button>
-          <div className="flex items-center gap-2 ml-2">
-            <div className="w-7 h-7 rounded-md bg-amber-brand flex items-center justify-center">
-              <Compass className="w-4 h-4 text-white" />
-            </div>
-            <span className="text-sm font-semibold text-slate-brand">{organization?.name || 'Safari CRM'}</span>
-          </div>
-        </div>
+        {/* Mobile top bar */}
+        <MobileTopBar
+          organization={organization}
+          user={user}
+          logout={logout}
+          pageLabel={currentPageLabel}
+        />
 
         <ReadOnlyBanner />
         <PaywallBanner />
         <EmailVerifyBanner user={user} />
-        <div className="p-4 lg:p-8 max-w-[1440px]">
+        <div className="p-4 lg:p-8 max-w-[1440px] pb-24 lg:pb-8">
           <Outlet />
         </div>
+
+        {/* Mobile bottom nav */}
+        <MobileBottomNav
+          onMoreClick={() => setMoreOpen(true)}
+          currentPath={location.pathname}
+        />
       </main>
+
+      {/* More sheet */}
+      {moreOpen && (
+        <MoreSheet
+          user={user}
+          logout={logout}
+          onClose={() => setMoreOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function MobileTopBar({ organization, user, logout, pageLabel }) {
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useRef(null);
+
+  useEffect(() => {
+    const handleClick = (e) => {
+      if (profileRef.current && !profileRef.current.contains(e.target)) setProfileOpen(false);
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  return (
+    <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between h-14 px-4 bg-white border-b border-sand-200">
+      <div className="flex items-center gap-2.5 min-w-0">
+        {organization?.branding?.logo ? (
+          <img
+            src={organization.branding.logo}
+            alt={organization.name}
+            className="w-8 h-8 rounded-lg object-cover flex-shrink-0"
+          />
+        ) : (
+          <div className="w-8 h-8 rounded-md bg-amber-brand flex items-center justify-center flex-shrink-0">
+            <Compass className="w-4 h-4 text-white" />
+          </div>
+        )}
+        <span className="text-sm font-semibold text-slate-brand truncate">
+          {pageLabel || organization?.name || 'Safari CRM'}
+        </span>
+      </div>
+
+      <div className="flex items-center gap-1">
+        <NotificationBell variant="topbar" />
+
+        <div ref={profileRef} className="relative">
+          <button
+            onClick={() => setProfileOpen(!profileOpen)}
+            className="flex items-center gap-1 p-1 rounded-md hover:bg-muted transition-colors"
+          >
+            <div className="w-8 h-8 rounded-full bg-amber-brand/80 flex items-center justify-center text-xs font-semibold text-white">
+              {getInitials(user?.name)}
+            </div>
+            <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${profileOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {profileOpen && (
+            <div className="absolute right-0 top-full mt-2 w-56 bg-card rounded-xl shadow-xl border border-border overflow-hidden z-50 animate-scale-in">
+              <div className="px-4 py-3 border-b border-border">
+                <p className="text-sm font-medium text-foreground truncate">{user?.name}</p>
+                <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+                <p className="text-[10px] text-muted-foreground capitalize mt-0.5">{user?.role}</p>
+              </div>
+              <div className="py-1">
+                <Link
+                  to="/settings"
+                  onClick={() => setProfileOpen(false)}
+                  className="flex items-center gap-2.5 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                >
+                  <Settings className="w-4 h-4 text-muted-foreground" />
+                  Settings
+                </Link>
+                <button
+                  onClick={() => { setProfileOpen(false); logout(); }}
+                  className="w-full flex items-center gap-2.5 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Log out
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MobileBottomNav({ onMoreClick, currentPath }) {
+  const isMoreActive = !bottomNavPaths.some(p =>
+    p === '/' ? currentPath === '/' : currentPath.startsWith(p)
+  );
+
+  return (
+    <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-sand-200 flex items-stretch h-16 pb-safe">
+      {bottomNavItems.map(({ path, icon: Icon, label, end }) => (
+        <NavLink
+          key={path}
+          to={path}
+          end={end}
+          className={({ isActive }) => `
+            flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors
+            ${isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}
+          `}
+        >
+          <Icon className="w-5 h-5" strokeWidth={2} />
+          <span className="text-[10px] font-medium">{label}</span>
+        </NavLink>
+      ))}
+      <button
+        onClick={onMoreClick}
+        className={`flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors ${
+          isMoreActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+        }`}
+      >
+        <MoreHorizontal className="w-5 h-5" strokeWidth={2} />
+        <span className="text-[10px] font-medium">More</span>
+      </button>
+    </nav>
+  );
+}
+
+function MoreSheet({ user, logout, onClose }) {
+  const moreItems = [
+    { path: '/destinations', icon: MapPin, label: 'Destinations' },
+    { path: '/automations', icon: Zap, label: 'Automations' },
+    ...(user?.isSuperAdmin ? [{ path: '/admin/library', icon: ImageIcon, label: 'Image Library' }] : []),
+    { path: '/settings', icon: Settings, label: 'Settings' },
+  ];
+
+  return (
+    <div className="lg:hidden fixed inset-0 z-50 flex items-end animate-fade-in">
+      <div
+        className="absolute inset-0 bg-black/40"
+        onClick={onClose}
+      />
+      <div className="relative w-full bg-white rounded-t-2xl shadow-2xl pb-safe animate-sheet-up">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-sand-200">
+          <h3 className="text-base font-semibold text-slate-brand">More</h3>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-md text-muted-foreground hover:bg-muted"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="py-2">
+          {moreItems.map(({ path, icon: Icon, label }) => (
+            <NavLink
+              key={path}
+              to={path}
+              onClick={onClose}
+              className={({ isActive }) => `
+                flex items-center gap-3 px-5 py-3.5 text-sm transition-colors
+                ${isActive ? 'bg-primary/10 text-primary font-semibold' : 'text-foreground hover:bg-muted'}
+              `}
+            >
+              <Icon className="w-5 h-5 flex-shrink-0" strokeWidth={1.8} />
+              {label}
+            </NavLink>
+          ))}
+        </div>
+        <div className="border-t border-sand-200 py-2">
+          <button
+            onClick={() => { onClose(); logout(); }}
+            className="w-full flex items-center gap-3 px-5 py-3.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
+          >
+            <LogOut className="w-5 h-5" />
+            Log out
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

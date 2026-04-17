@@ -21,7 +21,7 @@ const typeColors = {
   system: 'bg-muted text-muted-foreground',
 };
 
-export default function NotificationBell() {
+export default function NotificationBell({ variant = 'sidebar' }) {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [open, setOpen] = useState(false);
@@ -92,13 +92,22 @@ export default function NotificationBell() {
     return `${Math.floor(seconds / 86400)}d`;
   };
 
+  const isTopbar = variant === 'topbar';
+  const buttonCls = isTopbar
+    ? 'relative p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+    : 'relative p-1.5 rounded-md text-white/50 hover:text-white hover:bg-card/10 transition-colors';
+  const bellSize = isTopbar ? 'w-5 h-5' : 'w-4 h-4';
+  const dropdownPosCls = isTopbar
+    ? 'fixed right-3 top-14 w-[calc(100vw-1.5rem)] max-w-sm'
+    : 'absolute left-full ml-2 bottom-0 w-80';
+
   return (
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="relative p-1.5 rounded-md text-white/50 hover:text-white hover:bg-card/10 transition-colors"
+        className={buttonCls}
       >
-        <Bell className="w-4 h-4" />
+        <Bell className={bellSize} />
         {unreadCount > 0 && (
           <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
             {unreadCount > 9 ? '9+' : unreadCount}
@@ -107,7 +116,7 @@ export default function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute left-full ml-2 bottom-0 w-80 bg-card rounded-xl shadow-xl border border-border overflow-hidden z-50 animate-scale-in">
+        <div className={`${dropdownPosCls} bg-card rounded-xl shadow-xl border border-border overflow-hidden z-50 animate-scale-in`}>
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
             <h3 className="text-sm font-semibold text-foreground">Notifications</h3>
             <div className="flex items-center gap-2">

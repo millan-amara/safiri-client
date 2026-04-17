@@ -74,50 +74,56 @@ export default function DashboardPage() {
   ];
 
   return (
-    <div className="space-y-8 max-w-[1440px] mx-auto px-6 pb-12 animate-fade-in">
+    <div className="space-y-6 sm:space-y-8 max-w-[1440px] mx-auto pb-12 animate-fade-in">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div className="space-y-1 min-w-0">
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">
             {greeting}, {firstName}
           </h1>
-          <p className="text-sm text-muted-foreground">
-            Dashboard overview · {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+          <p className="text-xs sm:text-sm text-muted-foreground">
+            <span className="hidden sm:inline">Dashboard overview · </span>
+            <span className="sm:hidden">
+              {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+            </span>
+            <span className="hidden sm:inline">
+              {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+            </span>
           </p>
         </div>
         <Link
           to="/quotes/new"
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity shadow-sm"
+          className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity shadow-sm self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" /> New quote
         </Link>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {statCards.map(({ label, value, sub, icon: Icon, link }) => (
           <Link
             key={label}
             to={link}
-            className="group bg-card border border-border rounded-xl p-5 hover:border-primary/40 hover:shadow-sm transition-all duration-200"
+            className="group bg-card border border-border rounded-xl p-4 sm:p-5 hover:border-primary/40 hover:shadow-sm transition-all duration-200"
           >
-            <div className="flex items-start justify-between mb-4">
-              <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
-                <Icon className="w-5 h-5 text-muted-foreground" strokeWidth={1.5} />
+            <div className="flex items-start justify-between mb-3 sm:mb-4">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-muted flex items-center justify-center">
+                <Icon className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground" strokeWidth={1.5} />
               </div>
               <ArrowUpRight className="w-4 h-4 text-muted-foreground/50 group-hover:text-primary group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" />
             </div>
-            <p className="text-2xl font-semibold text-foreground tracking-tight tabular-nums">{value}</p>
-            <p className="text-xs text-muted-foreground mt-1">{label}</p>
-            <p className="text-[11px] text-muted-foreground/70 mt-1.5">{sub}</p>
+            <p className="text-lg sm:text-2xl font-semibold text-foreground tracking-tight tabular-nums truncate">{value}</p>
+            <p className="text-xs text-muted-foreground mt-1 truncate">{label}</p>
+            <p className="text-[11px] text-muted-foreground/70 mt-1.5 truncate">{sub}</p>
           </Link>
         ))}
       </div>
 
       {/* Main Analytics Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
         {/* Pipeline Chart — 2 cols */}
-        <div className="lg:col-span-2 bg-card border border-border rounded-xl p-6">
+        <div className="lg:col-span-2 bg-card border border-border rounded-xl p-4 sm:p-6">
           <div className="flex items-center justify-between mb-6">
             <div>
               <h3 className="text-sm font-medium text-foreground">Pipeline distribution</h3>
@@ -145,17 +151,18 @@ export default function DashboardPage() {
                   return { ...entry, fill: stageColors[entry._id] || 'hsl(222 25% 12%)' };
                 })}
                 margin={{ top: 10, right: 10, left: 0, bottom: 10 }}
-                barSize={48}
+                barSize={36}
               >
                 <XAxis
                   dataKey="_id"
-                  tick={{ fontSize: 11, fill: 'hsl(220 10% 52%)' }}
+                  tick={{ fontSize: 10, fill: 'hsl(220 10% 52%)' }}
                   axisLine={false}
                   tickLine={false}
                   dy={8}
-                  angle={-15}
+                  angle={-30}
                   textAnchor="end"
-                  height={60}
+                  height={70}
+                  interval={0}
                 />
                 <YAxis
                   tick={{ fontSize: 11, fill: 'hsl(220 10% 52%)' }}
@@ -187,7 +194,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Recent Activity */}
-        <div className="bg-card border border-border rounded-xl p-6">
+        <div className="bg-card border border-border rounded-xl p-4 sm:p-6">
           <div className="flex items-center justify-between mb-6">
             <div>
               <h3 className="text-sm font-medium text-foreground">Recent activity</h3>
@@ -234,10 +241,10 @@ export default function DashboardPage() {
       </div>
 
       {/* Monthly Performance + Tasks */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
         {stats?.monthlyDeals?.length > 0 && (
-          <div className="lg:col-span-2 bg-card border border-border rounded-xl p-6">
-            <div className="flex items-center justify-between mb-6">
+          <div className="lg:col-span-2 bg-card border border-border rounded-xl p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4 sm:mb-6">
               <div>
                 <h3 className="text-sm font-medium text-foreground">Monthly performance</h3>
                 <p className="text-xs text-muted-foreground mt-0.5">Deal flow and revenue trends</p>
@@ -319,7 +326,7 @@ export default function DashboardPage() {
         )}
 
         {/* Tasks */}
-        <div className="bg-card border border-border rounded-xl p-6">
+        <div className="bg-card border border-border rounded-xl p-4 sm:p-6">
           <div className="flex items-center justify-between mb-6">
             <div>
               <h3 className="text-sm font-medium text-foreground">Pending tasks</h3>
@@ -367,18 +374,67 @@ export default function DashboardPage() {
       {/* Team Performance */}
       {stats?.teamPerformance?.filter(m => m.dealsCreated > 0 || m.activeDeals > 0 || m.dealsWon > 0 || m.quotesCreated > 0).length > 0 && (
         <div className="bg-card border border-border rounded-xl overflow-hidden">
-          <div className="px-6 py-5 border-b border-border">
-            <div className="flex items-center justify-between">
-              <div>
+          <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-border">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
                 <h3 className="text-sm font-medium text-foreground">Team performance</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">Individual metrics and conversion rates</p>
+                <p className="text-xs text-muted-foreground mt-0.5 truncate">Individual metrics and conversion rates</p>
               </div>
-              <Link to="/settings" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors">
-                Manage team <ArrowRight className="w-3 h-3" />
+              <Link to="/settings" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors whitespace-nowrap">
+                Manage <ArrowRight className="w-3 h-3" />
               </Link>
             </div>
           </div>
-          <div className="overflow-x-auto">
+          {/* Mobile: stacked cards */}
+          <div className="sm:hidden divide-y divide-border">
+            {stats.teamPerformance
+              .filter(m => m.dealsCreated > 0 || m.activeDeals > 0 || m.dealsWon > 0 || m.quotesCreated > 0)
+              .sort((a, b) => b.revenue - a.revenue)
+              .map((member) => (
+                <div key={member._id} className="px-4 py-3">
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-8 h-8 rounded-full bg-muted text-muted-foreground flex items-center justify-center text-xs font-medium shrink-0">
+                        {member.name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-medium text-foreground truncate">{member.name}</p>
+                        <p className="text-[11px] text-muted-foreground capitalize truncate">{member.role}</p>
+                      </div>
+                    </div>
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full shrink-0 ${
+                      member.conversionRate >= 50
+                        ? 'bg-primary/10 text-primary'
+                        : 'bg-muted text-muted-foreground'
+                    }`}>
+                      {member.conversionRate}%
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2 text-xs mt-2">
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Active</p>
+                      <p className="text-foreground tabular-nums mt-0.5">{member.activeDeals}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Won</p>
+                      <p className="text-foreground font-medium tabular-nums mt-0.5">{member.dealsWon}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Quotes</p>
+                      <p className="text-foreground tabular-nums mt-0.5">{member.quotesCreated}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Revenue</p>
+                      <p className="text-foreground font-medium tabular-nums mt-0.5 truncate">
+                        {member.revenue > 0 ? formatCurrency(member.revenue) : '—'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+          </div>
+          {/* Desktop/tablet: table */}
+          <div className="hidden sm:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/40">
@@ -434,30 +490,30 @@ export default function DashboardPage() {
 
       {/* Partner Database */}
       {partnerStats && (
-        <div className="bg-card border border-border rounded-xl p-6">
-          <div className="flex items-center justify-between mb-6">
-            <div>
+        <div className="bg-card border border-border rounded-xl p-4 sm:p-6">
+          <div className="flex items-center justify-between gap-3 mb-4 sm:mb-6">
+            <div className="min-w-0">
               <h3 className="text-sm font-medium text-foreground">Partner database</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Your supplier network</p>
+              <p className="text-xs text-muted-foreground mt-0.5 truncate">Your supplier network</p>
             </div>
-            <Link to="/partners" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors">
-              Manage partners <ArrowRight className="w-3 h-3" />
+            <Link to="/partners" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors whitespace-nowrap">
+              Manage <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
             {[
               { label: 'Hotels', value: partnerStats.hotels || 0, icon: Building2 },
               { label: 'Transport', value: partnerStats.transport || 0, icon: Briefcase },
               { label: 'Activities', value: partnerStats.activities || 0, icon: Star },
               { label: 'Destinations', value: partnerStats.destinations || 0, icon: Layers },
             ].map(({ label, value, icon: Icon }) => (
-              <div key={label} className="flex items-center gap-3 p-4 rounded-lg bg-muted/40">
-                <div className="w-10 h-10 rounded-lg bg-card border border-border flex items-center justify-center">
-                  <Icon className="w-5 h-5 text-muted-foreground" strokeWidth={1.5} />
+              <div key={label} className="flex items-center gap-3 p-3 sm:p-4 rounded-lg bg-muted/40">
+                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-card border border-border flex items-center justify-center shrink-0">
+                  <Icon className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground" strokeWidth={1.5} />
                 </div>
-                <div>
-                  <p className="text-xl font-semibold text-foreground tabular-nums leading-none">{value}</p>
-                  <p className="text-xs text-muted-foreground mt-1">{label}</p>
+                <div className="min-w-0">
+                  <p className="text-lg sm:text-xl font-semibold text-foreground tabular-nums leading-none">{value}</p>
+                  <p className="text-xs text-muted-foreground mt-1 truncate">{label}</p>
                 </div>
               </div>
             ))}

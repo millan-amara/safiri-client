@@ -105,21 +105,21 @@ export default function ContactDetailPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left — Contact Info */}
         <div className="space-y-4">
-          <div className="bg-card rounded-xl border border-border p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-14 h-14 rounded-full bg-primary/10 text-primary flex items-center justify-center text-lg font-bold">
+          <div className="bg-card rounded-xl border border-border p-4 sm:p-6">
+            <div className="flex items-center justify-between mb-4 gap-3">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <div className="w-14 h-14 rounded-full bg-primary/10 text-primary flex items-center justify-center text-lg font-bold shrink-0">
                   {getInitials(fullName)}
                 </div>
-                <div>
-                  <h1 className="text-lg font-bold text-foreground">{fullName}</h1>
-                  {contact.company && <p className="text-sm text-muted-foreground">{contact.position ? `${contact.position} at ` : ''}{contact.company}</p>}
+                <div className="min-w-0 flex-1">
+                  <h1 className="text-lg font-bold text-foreground truncate">{fullName}</h1>
+                  {contact.company && <p className="text-sm text-muted-foreground truncate">{contact.position ? `${contact.position} at ` : ''}{contact.company}</p>}
                 </div>
               </div>
               <button
                 onClick={() => editing ? handleSave() : setEditing(true)}
                 disabled={saving}
-                className="text-xs text-primary hover:underline flex items-center gap-1"
+                className="text-xs text-primary hover:underline flex items-center gap-1 shrink-0"
               >
                 {editing ? <><Save className="w-3 h-3" /> {saving ? 'Saving...' : 'Save'}</> : <><Edit3 className="w-3 h-3" /> Edit</>}
               </button>
@@ -273,7 +273,7 @@ export default function ContactDetailPage() {
         {/* Right — Deals + Attachments */}
         <div className="lg:col-span-2 space-y-4">
           {/* Deals */}
-          <div className="bg-card rounded-xl border border-border p-5">
+          <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
             <h3 className="text-sm font-semibold text-foreground mb-4">Deals ({deals.length})</h3>
             {deals.length > 0 ? (
               <div className="space-y-2">
@@ -281,17 +281,17 @@ export default function ContactDetailPage() {
                   <Link
                     key={deal._id}
                     to={`/crm/deals/${deal._id}`}
-                    className="flex items-center justify-between p-3 rounded-lg border border-border hover:border-border hover:bg-background transition-all group"
+                    className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 rounded-lg border border-border hover:border-border hover:bg-background transition-all group"
                   >
-                    <div>
-                      <p className="text-sm font-medium text-foreground">{deal.title}</p>
-                      <p className="text-xs text-muted-foreground">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground truncate">{deal.title}</p>
+                      <p className="text-xs text-muted-foreground line-clamp-2 sm:truncate">
                         {deal.destination && `${deal.destination} · `}
                         {deal.stage}
                         {deal.travelDates?.start && ` · ${formatDate(deal.travelDates.start)}`}
                       </p>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 sm:gap-3 flex-wrap shrink-0">
                       {deal.value > 0 && (
                         <span className="text-sm font-semibold text-foreground">{formatCurrency(deal.value)}</span>
                       )}
@@ -317,26 +317,26 @@ export default function ContactDetailPage() {
 
           {/* Tasks for this contact's deals */}
           {contactTasks.length > 0 && (
-            <div className="bg-card rounded-xl border border-border p-5">
+            <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
               <h3 className="text-sm font-semibold text-foreground mb-3">Tasks ({contactTasks.length})</h3>
               <div className="space-y-2">
                 {contactTasks.map((task) => (
-                  <div key={task._id} className="flex items-center justify-between py-2 border-b border-border/60 last:border-0">
-                    <div className="flex items-center gap-2.5">
+                  <div key={task._id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 py-2 border-b border-border/60 last:border-0">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
                       <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 ${
                         task.status === 'done' ? 'bg-green-500 border-green-500' : 'border-border'
                       }`}>
                         {task.status === 'done' && <span className="text-white text-[8px]">✓</span>}
                       </div>
-                      <div>
-                        <p className={`text-xs font-medium ${task.status === 'done' ? 'text-muted-foreground/70 line-through' : 'text-foreground'}`}>{task.title}</p>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          {task.deal && <span className="text-[10px] text-muted-foreground/70">{task.deal.title}</span>}
-                          {task.assignedTo && <span className="text-[10px] text-muted-foreground/70">{task.assignedTo.name}</span>}
+                      <div className="min-w-0 flex-1">
+                        <p className={`text-xs font-medium truncate ${task.status === 'done' ? 'text-muted-foreground/70 line-through' : 'text-foreground'}`}>{task.title}</p>
+                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                          {task.deal && <span className="text-[10px] text-muted-foreground/70 truncate">{task.deal.title}</span>}
+                          {task.assignedTo && <span className="text-[10px] text-muted-foreground/70 truncate">{task.assignedTo.name}</span>}
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
                       <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
                         task.priority === 'urgent' ? 'bg-red-100 text-red-600' :
                         task.priority === 'high' ? 'bg-orange-100 text-orange-600' :
@@ -353,8 +353,8 @@ export default function ContactDetailPage() {
           )}
 
           {/* Attachments */}
-          <div className="bg-card rounded-xl border border-border p-5">
-            <div className="flex items-center justify-between mb-4">
+          <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
+            <div className="flex items-center justify-between mb-4 gap-3">
               <h3 className="text-sm font-semibold text-foreground">Attachments</h3>
               <input type="file" ref={fileRef} className="hidden" onChange={async (e) => {
                 const file = e.target.files[0];
@@ -362,22 +362,22 @@ export default function ContactDetailPage() {
                 // In production: upload to Cloudinary, then save URL
                 toast.success(`File "${file.name}" ready for upload (Cloudinary integration needed)`);
               }} />
-              <button onClick={() => fileRef.current?.click()} className="text-xs text-primary hover:underline flex items-center gap-1">
+              <button onClick={() => fileRef.current?.click()} className="text-xs text-primary hover:underline flex items-center gap-1 shrink-0">
                 <Upload className="w-3 h-3" /> Upload
               </button>
             </div>
             {contact.attachments?.length > 0 ? (
               <div className="space-y-2">
                 {contact.attachments.map((att, i) => (
-                  <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-background border border-border">
-                    <div className="flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-muted-foreground/70" />
-                      <div>
-                        <p className="text-xs font-medium text-foreground">{att.name}</p>
+                  <div key={i} className="flex items-center justify-between gap-3 p-2 rounded-lg bg-background border border-border">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <FileText className="w-4 h-4 text-muted-foreground/70 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-medium text-foreground truncate">{att.name}</p>
                         <p className="text-[10px] text-muted-foreground/70">{formatDate(att.uploadedAt)}</p>
                       </div>
                     </div>
-                    <a href={att.url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline">View</a>
+                    <a href={att.url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline shrink-0">View</a>
                   </div>
                 ))}
               </div>

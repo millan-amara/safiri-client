@@ -28,19 +28,19 @@ export default function ReadOnlyBanner() {
   return (
     <div className="bg-red-50 border-b border-red-200 px-4 py-3">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="flex items-start gap-3">
+        <div className="flex items-start gap-3 min-w-0">
           <LockKeyhole className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-          <div>
+          <div className="min-w-0">
             <p className="text-sm font-semibold text-red-900">Your account is in read-only mode</p>
-            <p className="text-xs text-red-700 mt-0.5 flex items-center gap-1.5">
-              <ShieldCheck className="w-3.5 h-3.5 flex-shrink-0" />
-              Your data is safe. You can view everything — just reactivate to create, edit, or delete.
+            <p className="text-xs text-red-700 mt-0.5 flex items-start sm:items-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 sm:mt-0" />
+              <span>Your data is safe. You can view everything — just reactivate to create, edit, or delete.</span>
             </p>
           </div>
         </div>
         <button
           onClick={() => navigate('/settings/billing')}
-          className="flex-shrink-0 px-4 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg transition-colors"
+          className="flex-shrink-0 self-start sm:self-auto px-4 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg transition-colors"
         >
           Reactivate your account
         </button>

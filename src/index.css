@@ -37,6 +37,8 @@
   --radius-lg: 0.5rem;
   --radius-xl: 0.75rem;
 
+  --breakpoint-xs: 400px;
+
   /* ─── Legacy aliases so existing pages still compile ─────── */
   /* "sand" scale → neutral grays so the old cream palette becomes clean neutrals */
   --color-sand-50: hsl(0 0% 99%);
@@ -148,3 +150,15 @@ body.sidebar-open {
 .stagger-children > *:nth-child(4) { animation-delay: 0.2s; }
 .stagger-children > *:nth-child(5) { animation-delay: 0.25s; }
 .stagger-children > *:nth-child(6) { animation-delay: 0.3s; }
+
+/* ─── Mobile helpers ──────────────────────────── */
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+@keyframes sheetUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.animate-sheet-up { animation: sheetUp 0.25s ease-out forwards; }

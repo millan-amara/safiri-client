@@ -37,9 +37,9 @@ export default function QuoteSharePage() {
 
   if (error || !quote) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-stone-50 p-6">
-        <div className="bg-white rounded-2xl border border-stone-200 p-8 max-w-md w-full text-center">
-          <h1 className="text-xl font-bold text-stone-800 mb-2" style={{ fontFamily: 'Playfair Display, serif' }}>
+      <div className="min-h-screen flex items-center justify-center bg-stone-50 p-4 sm:p-6">
+        <div className="bg-white rounded-2xl border border-stone-200 p-6 sm:p-8 max-w-md w-full text-center">
+          <h1 className="text-lg sm:text-xl font-bold text-stone-800 mb-2" style={{ fontFamily: 'Playfair Display, serif' }}>
             {error === 'expired' ? 'Quote Expired' : 'Quote Not Found'}
           </h1>
           <p className="text-sm text-stone-500">

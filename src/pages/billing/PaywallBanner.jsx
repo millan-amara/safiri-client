@@ -62,12 +62,12 @@ export default function PaywallBanner() {
     : 'bg-amber-600 hover:bg-amber-700 text-white';
 
   return (
-    <div className={`border-b px-4 py-2.5 flex items-center justify-between gap-4 ${bgClass}`}>
-      <div className="flex items-center gap-2 min-w-0">
-        <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-        <p className="text-xs font-medium truncate">{message}</p>
+    <div className={`border-b px-4 py-2.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4 ${bgClass}`}>
+      <div className="flex items-start sm:items-center gap-2 min-w-0">
+        <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5 sm:mt-0" />
+        <p className="text-xs font-medium line-clamp-2 sm:truncate">{message}</p>
       </div>
-      <div className="flex items-center gap-2 flex-shrink-0">
+      <div className="flex items-center gap-2 flex-shrink-0 self-end sm:self-auto">
         <button
           onClick={() => navigate('/settings/billing')}
           className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold transition-colors ${btnClass}`}

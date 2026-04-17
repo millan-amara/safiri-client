@@ -291,11 +291,11 @@ export default function QuoteBuilderPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <button onClick={() => navigate('/quotes')} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+        <button onClick={() => navigate('/quotes')} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors self-start sm:self-auto">
           <ArrowLeft className="w-4 h-4" /> Quotes
         </button>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center flex-wrap gap-2">
           {id && (
             <>
               <button
@@ -304,7 +304,7 @@ export default function QuoteBuilderPage() {
                   navigator.clipboard.writeText(url);
                   toast.success('Share link copied!');
                 }}
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm font-medium text-muted-foreground hover:border-border transition-colors"
+                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm font-medium text-muted-foreground hover:border-border transition-colors"
                 title="Copy share link"
               >
                 <Eye className="w-4 h-4" /> Share Link
@@ -312,7 +312,7 @@ export default function QuoteBuilderPage() {
               <a
                 href={`${import.meta.env.VITE_API_URL || '/api'}/pdf/${id}/pdf/download?token=${localStorage.getItem('token')}`}
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm font-medium text-muted-foreground hover:border-border transition-colors"
+                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm font-medium text-muted-foreground hover:border-border transition-colors"
               >
                 <FileText className="w-4 h-4" /> PDF
               </a>
@@ -326,7 +326,7 @@ export default function QuoteBuilderPage() {
                     toast.success('Saved as template');
                   } catch (err) { toast.error('Failed to save template'); }
                 }}
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm font-medium text-muted-foreground hover:border-border transition-colors"
+                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm font-medium text-muted-foreground hover:border-border transition-colors"
                 title="Save as reusable template"
               >
                 <Star className="w-4 h-4" /> Save as Template
@@ -340,7 +340,7 @@ export default function QuoteBuilderPage() {
                     navigate(`/quotes/${data._id}`);
                   } catch { toast.error('Version creation failed'); }
                 }}
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm font-medium text-muted-foreground hover:border-border transition-colors"
+                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm font-medium text-muted-foreground hover:border-border transition-colors"
                 title="Create new version"
               >
                 <Copy className="w-4 h-4" /> New Version
@@ -349,15 +349,15 @@ export default function QuoteBuilderPage() {
           )}
           <button
             onClick={() => setShowPreview(!showPreview)}
-            className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${showPreview ? 'bg-primary text-white border-primary hover:bg-primary' : 'bg-card border-border text-muted-foreground hover:border-border'}`}
+            className={`inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${showPreview ? 'bg-primary text-white border-primary hover:bg-primary' : 'bg-card border-border text-muted-foreground hover:border-border'}`}
             title="Toggle live preview"
           >
             <Eye className="w-4 h-4" /> {showPreview ? 'Hide Preview' : 'Preview'}
           </button>
-          <button onClick={() => handleSave('draft')} disabled={saving} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-card border border-border text-sm font-medium text-foreground hover:border-border transition-colors disabled:opacity-50">
+          <button onClick={() => handleSave('draft')} disabled={saving} className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-card border border-border text-sm font-medium text-foreground hover:border-border transition-colors disabled:opacity-50">
             <Save className="w-4 h-4" /> Save Draft
           </button>
-          <button onClick={() => handleSave('sent')} disabled={saving} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary transition-colors disabled:opacity-50">
+          <button onClick={() => handleSave('sent')} disabled={saving} className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary transition-colors disabled:opacity-50">
             <Send className="w-4 h-4" /> Save & Send
           </button>
         </div>
@@ -365,7 +365,7 @@ export default function QuoteBuilderPage() {
 
       <div className={showPreview ? 'grid grid-cols-1 lg:grid-cols-2 gap-4' : 'grid grid-cols-1 xl:grid-cols-4 gap-6'}>
         {showPreview && (
-          <div className="lg:order-2 sticky top-4 max-h-[calc(100vh-2rem)] overflow-y-auto rounded-xl border border-border bg-card">
+          <div className="lg:order-2 lg:sticky lg:top-4 max-h-[60vh] lg:max-h-[calc(100vh-2rem)] overflow-y-auto rounded-xl border border-border bg-card">
             <div className="sticky top-0 z-10 bg-primary/10 border-b border-amber-100 px-3 py-1.5 text-[10px] font-semibold text-primary uppercase tracking-wide flex items-center gap-1.5">
               <Eye className="w-3 h-3" /> Live Preview
             </div>
@@ -376,7 +376,7 @@ export default function QuoteBuilderPage() {
         )}
         <div className={showPreview ? 'lg:order-1 space-y-4' : 'xl:col-span-3 space-y-4'}>
           {/* Trip Info */}
-          <div className="bg-card rounded-xl border border-border p-5">
+          <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">Trip Title</label>
@@ -435,7 +435,7 @@ export default function QuoteBuilderPage() {
           </div>
 
           {/* Cover Narrative + Tour Type */}
-          <div className="bg-card rounded-xl border border-border p-5">
+          <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">Tour Type</label>
@@ -490,7 +490,7 @@ export default function QuoteBuilderPage() {
             />
             <div className="mt-4">
               <label className="block text-xs font-medium text-muted-foreground mb-2">Style</label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 {[
                   { id: 'editorial', name: 'Editorial', desc: 'Serif headings, classic' },
                   { id: 'modern', name: 'Modern', desc: 'Bold sans, clean' },
@@ -515,7 +515,7 @@ export default function QuoteBuilderPage() {
             </div>
             <div className="mt-4">
               <label className="block text-xs font-medium text-muted-foreground mb-2">Cover Layout</label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 {[
                   { id: 'full_bleed', name: 'Full Bleed', desc: 'Image fills page' },
                   { id: 'split', name: 'Split', desc: 'Image left, text right' },
@@ -615,7 +615,7 @@ export default function QuoteBuilderPage() {
         {/* Pricing sidebar - 1 col */}
         {!showPreview && (
         <div className="space-y-4">
-          <div className="bg-card rounded-xl border border-border p-5 sticky top-8">
+          <div className="bg-card rounded-xl border border-border p-4 sm:p-5 xl:sticky xl:top-8">
             <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-1.5">
               <DollarSign className="w-4 h-4" /> Pricing
             </h3>
@@ -693,7 +693,7 @@ export default function QuoteBuilderPage() {
           </div>
 
           {/* Summary */}
-          <div className="bg-card rounded-xl border border-border p-5">
+          <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
             <h3 className="text-sm font-semibold text-foreground mb-3">Summary</h3>
             <div className="space-y-2 text-xs">
               <div className="flex justify-between">
@@ -737,7 +737,7 @@ export default function QuoteBuilderPage() {
           />
 
           {/* Payment terms */}
-          <div className="bg-card rounded-xl border border-border p-5">
+          <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
             <h3 className="text-sm font-semibold text-foreground mb-2">Payment Terms</h3>
             <textarea
               value={quote.paymentTerms || ''}
@@ -926,7 +926,7 @@ function AIPanel({ quote, setQuote, destinations }) {
   };
 
   return (
-    <div className="bg-card rounded-xl border border-border p-5">
+    <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
       <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-1.5">
         <Sparkles className="w-4 h-4 text-primary" /> AI Assistant
       </h3>
@@ -1082,7 +1082,7 @@ function ListEditor({ title, icon, items, onChange, color }) {
   const iconColor = color === 'green' ? 'text-green-500' : 'text-muted-foreground/70';
 
   return (
-    <div className={`bg-card rounded-xl border ${borderColor} p-5`}>
+    <div className={`bg-card rounded-xl border ${borderColor} p-4 sm:p-5`}>
       <h3 className="text-sm font-semibold text-foreground mb-3">{icon} {title}</h3>
       <div className="space-y-1.5 mb-3">
         {items.map((item, i) => (
@@ -1091,7 +1091,7 @@ function ListEditor({ title, icon, items, onChange, color }) {
             <span className="text-xs text-muted-foreground flex-1 mx-2">{item}</span>
             <button
               onClick={() => removeItem(i)}
-              className="text-muted-foreground/40 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
+              className="text-muted-foreground/40 hover:text-red-400 sm:opacity-0 sm:group-hover:opacity-100 transition-all"
             >
               <X className="w-3 h-3" />
             </button>
@@ -1156,11 +1156,11 @@ function CoverImagePicker({ coverImage, days, onChange }) {
   return (
     <div className="mt-4">
       <label className="block text-xs font-medium text-muted-foreground mb-2">Cover Image</label>
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         {coverImage?.url ? (
-          <img src={coverImage.url} alt="" className="w-24 h-16 object-cover rounded-lg border border-border" />
+          <img src={coverImage.url} alt="" className="w-24 h-16 object-cover rounded-lg border border-border shrink-0" />
         ) : (
-          <div className="w-24 h-16 rounded-lg bg-muted border border-dashed border-border flex items-center justify-center text-[10px] text-muted-foreground text-center px-1">
+          <div className="w-24 h-16 rounded-lg bg-muted border border-dashed border-border flex items-center justify-center text-[10px] text-muted-foreground text-center px-1 shrink-0">
             Auto from itinerary
           </div>
         )}
@@ -1215,7 +1215,7 @@ function CoverImagePicker({ coverImage, days, onChange }) {
               {candidates.length > 0 ? (
                 <>
                   <p className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-3">From your itinerary</p>
-                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                     {candidates.map((img, i) => {
                       const active = coverImage?.url === img.url;
                       return (
@@ -1393,7 +1393,7 @@ function LineItemsEditor({ lineItems, onChange, segments, marginPercent, currenc
                     <span className="text-[11px] font-medium text-foreground">{formatCurrency(item.total, currency)}</span>
                     <button
                       onClick={(e) => { e.stopPropagation(); removeItem(i); }}
-                      className="text-muted-foreground/40 hover:text-red-400 opacity-0 group-hover:opacity-100"
+                      className="text-muted-foreground/40 hover:text-red-400 sm:opacity-0 sm:group-hover:opacity-100"
                     >
                       <Trash2 className="w-3 h-3" />
                     </button>
@@ -1452,8 +1452,8 @@ function DayCard({
 
       <div className={`bg-card rounded-xl border transition-all ${isExpanded ? 'border-primary/40 shadow-sm' : 'border-border hover:border-border'} ${day.isTransitDay ? 'border-dashed' : ''}`}>
         {/* Day header */}
-        <div className="flex items-center justify-between p-4 cursor-pointer" onClick={onToggle}>
-          <div className="flex items-center gap-3 flex-1 min-w-0">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 sm:p-4 cursor-pointer" onClick={onToggle}>
+          <div className="flex items-center gap-3 min-w-0 flex-1">
             <div className={`w-9 h-9 rounded-full text-white flex items-center justify-center text-xs font-bold flex-shrink-0 ${day.isTransitDay ? 'bg-muted-foreground/40' : 'bg-primary'}`}>
               {day.dayNumber}
             </div>
@@ -1474,9 +1474,9 @@ function DayCard({
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <div className="text-right">
-              <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wide flex items-center justify-end gap-1">
+          <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
+            <div className="text-left sm:text-right">
+              <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wide flex items-center sm:justify-end gap-1">
                 Cost / Price
                 {day.marginOverride != null && (
                   <span className="text-[8px] bg-primary/15 text-primary px-1 rounded font-semibold">{day.marginOverride}%</span>
@@ -1510,7 +1510,7 @@ function DayCard({
 
         {/* Expanded content */}
         {isExpanded && (
-          <div className="border-t border-border p-4 space-y-4">
+          <div className="border-t border-border p-3 sm:p-4 space-y-4">
             {/* Title + Location + Transit toggle */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -1675,7 +1675,7 @@ function DayCard({
                 </button>
               </div>
               {day.images?.length > 0 ? (
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                   {day.images.map((img, i) => (
                     <div key={i} className="relative group aspect-square rounded-lg overflow-hidden border border-border">
                       <img src={img.url} alt="" className="w-full h-full object-cover" />
@@ -1684,7 +1684,7 @@ function DayCard({
                           <Star className="w-2 h-2" /> HERO
                         </div>
                       )}
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100">
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center gap-1 sm:opacity-0 sm:group-hover:opacity-100">
                         {i !== 0 && (
                           <button onClick={() => onSetHero(i)} className="text-white text-[10px] bg-card/20 hover:bg-card/30 px-1.5 py-0.5 rounded">Set hero</button>
                         )}
@@ -1820,7 +1820,7 @@ function DayImagePicker({ hotels, destinations, currentLocation, currentHotel, o
           <button onClick={onClose} className="text-muted-foreground/70 hover:text-muted-foreground"><X className="w-4 h-4" /></button>
         </div>
 
-        <div className="flex gap-1 px-5 pt-3 border-b border-border">
+        <div className="flex gap-1 px-5 pt-3 border-b border-border overflow-x-auto">
           {[
             { id: 'upload', label: 'Upload' },
             { id: 'destination', label: `Destination${destImages.length ? ` (${destImages.length})` : ''}` },
@@ -1829,7 +1829,7 @@ function DayImagePicker({ hotels, destinations, currentLocation, currentHotel, o
             { id: 'url', label: 'URL' },
           ].map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
-              className={`px-3 py-2 text-xs font-medium transition-colors relative ${tab === t.id ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
+              className={`px-3 py-2 text-xs font-medium transition-colors relative whitespace-nowrap ${tab === t.id ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
               {t.label}
               {tab === t.id && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />}
             </button>
@@ -1854,7 +1854,7 @@ function DayImagePicker({ hotels, destinations, currentLocation, currentHotel, o
                 <span className="text-xs">Add images to the destination in the Destinations page.</span>
               </div>
             ) : (
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {destImages.map((img, i) => (
                   <button key={i} onClick={() => onPick({ url: img.url, source: 'destination' })}
                     className="aspect-square rounded-lg overflow-hidden border border-border hover:border-primary transition-colors">
@@ -1869,7 +1869,7 @@ function DayImagePicker({ hotels, destinations, currentLocation, currentHotel, o
             hotelImages.length === 0 ? (
               <div className="text-center py-8 text-sm text-muted-foreground/70">No hotel images for this location.</div>
             ) : (
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {hotelImages.map((img, i) => (
                   <button key={i} onClick={() => onPick({ url: img.url, source: 'hotel' })}
                     className="aspect-square rounded-lg overflow-hidden border border-border hover:border-primary transition-colors relative group">
@@ -1905,7 +1905,7 @@ function DayImagePicker({ hotels, destinations, currentLocation, currentHotel, o
                   No library images found{libraryQuery ? ` for "${libraryQuery}"` : ''}.
                 </div>
               ) : (
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {libraryItems.map(img => (
                     <button key={img._id} onClick={() => pickLibrary(img)} title={img.credit || img.caption || ''}
                       className="aspect-square rounded-lg overflow-hidden border border-border hover:border-primary transition-colors relative group">
@@ -1984,7 +1984,7 @@ function BlockToggles({ blocks = [], onChange }) {
   };
 
   return (
-    <div className="bg-card rounded-xl border border-border p-5">
+    <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
       <h3 className="text-sm font-semibold text-foreground mb-1">Quote Sections</h3>
       <p className="text-[10px] text-muted-foreground mb-3">Toggle and reorder what shows on the client page</p>
       <div className="space-y-1">

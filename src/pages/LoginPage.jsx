@@ -45,19 +45,19 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex">
       {/* Left — form */}
-      <div className="flex-1 flex items-center justify-center p-8">
+      <div className="flex-1 flex items-center justify-center p-4 sm:p-8">
         <div className="w-full max-w-sm animate-slide-up">
-          <div className="flex items-center gap-2.5 mb-10">
+          <div className="flex items-center gap-2.5 mb-8 sm:mb-10">
             <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
               <Compass className="w-5 h-5 text-white" />
             </div>
             <span className="text-xl font-bold text-foreground tracking-tight">SafiriPro</span>
           </div>
 
-          <h2 className="text-2xl font-bold text-foreground mb-1" style={{ fontFamily: 'Playfair Display, serif' }}>
+          <h2 className="text-xl sm:text-2xl font-bold text-foreground mb-1" style={{ fontFamily: 'Playfair Display, serif' }}>
             Welcome back
           </h2>
-          <p className="text-sm text-muted-foreground mb-8">Sign in to your workspace</p>
+          <p className="text-sm text-muted-foreground mb-6 sm:mb-8">Sign in to your workspace</p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -140,14 +140,14 @@ export default function LoginPage() {
       </div>
 
       {/* Right — visual */}
-      <div className="hidden lg:flex flex-1 bg-foreground items-center justify-center p-12 relative overflow-hidden">
+      <div className="hidden lg:flex flex-1 bg-foreground items-center justify-center p-8 xl:p-12 relative overflow-hidden">
         <div className="absolute inset-0 opacity-10">
           <div className="absolute top-20 right-20 w-64 h-64 rounded-full bg-primary" />
           <div className="absolute bottom-32 left-16 w-48 h-48 rounded-full bg-safari-500" />
           <div className="absolute top-1/2 right-1/3 w-32 h-32 rounded-full bg-muted-foreground/40" />
         </div>
         <div className="relative z-10 max-w-md text-center">
-          <h2 className="text-4xl font-bold text-white mb-4" style={{ fontFamily: 'Playfair Display, serif' }}>
+          <h2 className="text-3xl xl:text-4xl font-bold text-white mb-4" style={{ fontFamily: 'Playfair Display, serif' }}>
             Craft unforgettable<br />safari experiences
           </h2>
           <p className="text-white/60 text-base leading-relaxed">

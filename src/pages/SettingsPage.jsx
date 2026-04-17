@@ -62,18 +62,18 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold text-foreground" style={{ fontFamily: 'Playfair Display, serif' }}>Settings</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Manage your workspace</p>
+        <h1 className="text-xl sm:text-2xl font-bold text-foreground" style={{ fontFamily: 'Playfair Display, serif' }}>Settings</h1>
+        <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Manage your workspace</p>
       </div>
 
-      <div className="flex gap-6 flex-col lg:flex-row">
+      <div className="flex gap-4 sm:gap-6 flex-col lg:flex-row">
         {/* Sidebar nav */}
-        <div className="lg:w-48 flex lg:flex-col gap-1 overflow-x-auto">
+        <div className="lg:w-48 flex lg:flex-col gap-1 overflow-x-auto -mx-4 px-4 lg:mx-0 lg:px-0 pb-1 lg:pb-0">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => id === 'billing' ? navigate('/settings/billing') : setTab(id)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors shrink-0 ${
                 tab === id ? 'bg-primary text-white' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
               }`}
             >
@@ -83,10 +83,10 @@ export default function SettingsPage() {
         </div>
 
         {/* Content */}
-        <div className="flex-1 max-w-2xl">
+        <div className="flex-1 max-w-2xl min-w-0">
           {/* BRANDING */}
           {tab === 'branding' && (
-            <div className="bg-card rounded-xl border border-border p-6 space-y-5">
+            <div className="bg-card rounded-xl border border-border p-4 sm:p-6 space-y-5">
               <h3 className="text-base font-semibold text-foreground">Branding</h3>
 
               {/* Logo Upload */}
@@ -104,7 +104,7 @@ export default function SettingsPage() {
 
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-2">Brand Colors</label>
-                <div className="flex gap-4">
+                <div className="flex flex-wrap gap-4">
                   {[
                     { key: 'primaryColor', label: 'Primary' },
                     { key: 'secondaryColor', label: 'Secondary' },
@@ -123,7 +123,7 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1">Email</label>
                   <input
@@ -165,7 +165,7 @@ export default function SettingsPage() {
               <div className="pt-4 border-t border-border">
                 <h4 className="text-sm font-semibold text-foreground mb-1">Cover Quote</h4>
                 <p className="text-xs text-muted-foreground mb-3">Replaces the default Henry Miller quote on the closing page of every quote.</p>
-                <div className="grid grid-cols-[1fr_180px] gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-[1fr_180px] gap-3">
                   <textarea
                     rows={2}
                     placeholder={`e.g. "Travel makes one modest. You see what a tiny place you occupy in the world."`}
@@ -191,10 +191,10 @@ export default function SettingsPage() {
 
           {/* DEFAULTS */}
           {tab === 'defaults' && (
-            <div className="bg-card rounded-xl border border-border p-6 space-y-5">
+            <div className="bg-card rounded-xl border border-border p-4 sm:p-6 space-y-5">
               <h3 className="text-base font-semibold text-foreground">Quote Defaults</h3>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1">Default Currency</label>
                   <select
@@ -233,11 +233,11 @@ export default function SettingsPage() {
 
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">WhatsApp Task Reminder</label>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                   <select
                     value={org.defaults?.taskReminderHours ?? 24}
                     onChange={(e) => setOrg({ ...org, defaults: { ...org.defaults, taskReminderHours: parseInt(e.target.value) } })}
-                    className="w-48 px-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:border-primary transition-colors"
+                    className="w-full sm:w-48 px-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:border-primary transition-colors"
                   >
                     <option value={1}>1 hour before due</option>
                     <option value={2}>2 hours before due</option>
@@ -321,15 +321,15 @@ function LogoUpload({ logo, onUploaded }) {
   return (
     <div>
       <label className="block text-xs font-medium text-muted-foreground mb-2">Company Logo</label>
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-4">
         {logo ? (
-          <img src={logo} alt="Logo" className="h-14 w-auto object-contain rounded-lg border border-border bg-card p-1" />
+          <img src={logo} alt="Logo" className="h-14 w-auto object-contain rounded-lg border border-border bg-card p-1 shrink-0" />
         ) : (
-          <div className="w-14 h-14 rounded-lg border-2 border-dashed border-border flex items-center justify-center">
+          <div className="w-14 h-14 rounded-lg border-2 border-dashed border-border flex items-center justify-center shrink-0">
             <Image className="w-6 h-6 text-muted-foreground/40" />
           </div>
         )}
-        <div>
+        <div className="min-w-0">
           <input type="file" ref={fileRef} onChange={handleUpload} accept="image/*" className="hidden" />
           <button
             type="button"
@@ -392,10 +392,10 @@ function ProfileSection() {
   };
 
   return (
-    <div className="bg-card rounded-xl border border-border p-6 space-y-5">
+    <div className="bg-card rounded-xl border border-border p-4 sm:p-6 space-y-5">
       <h3 className="text-base font-semibold text-foreground">My Profile</h3>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="block text-xs font-medium text-muted-foreground mb-1">Name</label>
           <input
@@ -409,7 +409,7 @@ function ProfileSection() {
           <label className="block text-xs font-medium text-muted-foreground mb-1">WhatsApp Number</label>
           <PhoneInput value={phone} onChange={setPhone} />
         </div>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <label className="block text-xs font-medium text-muted-foreground mb-1">Job Title</label>
           <input
             type="text"
@@ -425,10 +425,10 @@ function ProfileSection() {
         <h4 className="text-sm font-semibold text-foreground mb-1">Quote Signature</h4>
         <p className="text-xs text-muted-foreground mb-4">Shown on the closing section of quotes you author. Adds a personal touch for clients.</p>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-2">Your Photo</label>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               {avatar
                 ? <img src={avatar} alt="" className="w-14 h-14 rounded-full object-cover border border-border" />
                 : <div className="w-14 h-14 rounded-full bg-muted border border-border flex items-center justify-center text-xs text-muted-foreground">None</div>}
@@ -443,7 +443,7 @@ function ProfileSection() {
           </div>
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-2">Signature Image (optional)</label>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               {signature
                 ? <img src={signature} alt="" className="h-12 object-contain border border-border rounded bg-white px-2" />
                 : <div className="h-12 w-24 rounded bg-muted border border-border flex items-center justify-center text-xs text-muted-foreground">None</div>}
@@ -526,10 +526,10 @@ function TeamSection({ team, onRefresh }) {
   const inputCls = 'w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors';
 
   return (
-    <div className="bg-card rounded-xl border border-border p-6 space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="bg-card rounded-xl border border-border p-4 sm:p-6 space-y-4">
+      <div className="flex items-center justify-between gap-2">
         <h3 className="text-base font-semibold text-foreground">Team Members</h3>
-        <button onClick={() => setShowInvite(!showInvite)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary transition-colors">
+        <button onClick={() => setShowInvite(!showInvite)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary transition-colors shrink-0">
           <Plus className="w-3.5 h-3.5" /> Invite
         </button>
       </div>
@@ -537,12 +537,12 @@ function TeamSection({ team, onRefresh }) {
       {showInvite && (
         <form onSubmit={handleInvite} className="p-4 rounded-lg bg-background border border-border space-y-3 animate-scale-in">
           <p className="text-xs text-muted-foreground">They'll receive an email with a link to set up their account.</p>
-          <div className="flex items-end gap-3">
-            <div className="flex-1">
+          <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+            <div className="flex-1 min-w-0">
               <label className="block text-xs font-medium text-muted-foreground mb-1">Email</label>
               <input type="email" value={inviteForm.email} onChange={e => setInviteForm({...inviteForm, email: e.target.value})} className={inputCls} placeholder="colleague@company.com" required autoFocus />
             </div>
-            <div className="w-28">
+            <div className="w-full sm:w-28">
               <label className="block text-xs font-medium text-muted-foreground mb-1">Role</label>
               <select value={inviteForm.role} onChange={e => setInviteForm({...inviteForm, role: e.target.value})} className={inputCls}>
                 <option value="agent">Agent</option>
@@ -550,7 +550,7 @@ function TeamSection({ team, onRefresh }) {
                 <option value="viewer">Viewer</option>
               </select>
             </div>
-            <button type="submit" disabled={inviting} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary disabled:opacity-50">
+            <button type="submit" disabled={inviting} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary disabled:opacity-50 shrink-0">
               {inviting ? 'Sending...' : 'Send Invite'}
             </button>
           </div>
@@ -561,29 +561,29 @@ function TeamSection({ team, onRefresh }) {
         {team.map((member) => {
           const isPending = member.status === 'pending' || (!member.name && !member.lastLogin);
           return (
-            <div key={member._id} className="flex items-center justify-between py-3 group">
-              <div className="flex items-center gap-3">
-                <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold ${
+            <div key={member._id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 py-3 group">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 ${
                   isPending ? 'bg-primary/15 text-amber-600' : member.isActive ? 'bg-muted text-muted-foreground' : 'bg-gray-100 text-gray-400'
                 }`}>
                   {isPending ? '✉' : getInitials(member.name || member.email)}
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className={`text-sm font-medium ${member.isActive ? 'text-foreground' : 'text-gray-400'}`}>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className={`text-sm font-medium truncate ${member.isActive ? 'text-foreground' : 'text-gray-400'}`}>
                       {member.name || member.email}
                     </p>
                     {isPending && <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary font-medium">Invite pending</span>}
                   </div>
-                  <p className="text-xs text-muted-foreground">{member.name ? member.email : ''}</p>
+                  <p className="text-xs text-muted-foreground truncate">{member.name ? member.email : ''}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap shrink-0">
                 {member.role !== 'owner' && (
                   <select
                     value={member.role}
                     onChange={(e) => changeRole(member, e.target.value)}
-                    className="text-xs px-2 py-1 rounded-md border border-border bg-card focus:outline-none opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="text-xs px-2 py-1 rounded-md border border-border bg-card focus:outline-none sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
                   >
                     <option value="admin">Admin</option>
                     <option value="agent">Agent</option>
@@ -596,7 +596,7 @@ function TeamSection({ team, onRefresh }) {
                   'bg-muted text-muted-foreground'
                 }`}>{member.role}</span>
                 {member.role !== 'owner' && (
-                  <button onClick={() => toggleActive(member)} className="opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button onClick={() => toggleActive(member)} className="sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                     {member.isActive
                       ? <ToggleRight className="w-6 h-6 text-green-500" />
                       : <ToggleLeft className="w-6 h-6 text-muted-foreground/70" />
@@ -692,15 +692,15 @@ function PipelinesSection({ pipelines, onRefresh }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <h3 className="text-base font-semibold text-foreground">Pipelines</h3>
-        <button onClick={() => setShowAdd(!showAdd)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary transition-colors">
+        <button onClick={() => setShowAdd(!showAdd)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary transition-colors shrink-0">
           <Plus className="w-3.5 h-3.5" /> New Pipeline
         </button>
       </div>
 
       {showAdd && (
-        <form onSubmit={handleCreate} className="bg-card rounded-xl border border-border p-5 space-y-3 animate-scale-in">
+        <form onSubmit={handleCreate} className="bg-card rounded-xl border border-border p-4 sm:p-5 space-y-3 animate-scale-in">
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1">Pipeline Name</label>
             <input type="text" value={newName} onChange={e => setNewName(e.target.value)} className={inputCls} placeholder="e.g. Inbound Leads" required autoFocus />
@@ -710,7 +710,7 @@ function PipelinesSection({ pipelines, onRefresh }) {
             <input type="text" value={newStages} onChange={e => setNewStages(e.target.value)} className={inputCls} placeholder="Stage 1, Stage 2, ..." />
             <p className="text-[10px] text-muted-foreground/70 mt-1">You can reorder and edit stages after creation</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button type="submit" disabled={creating} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary disabled:opacity-50">{creating ? 'Creating...' : 'Create Pipeline'}</button>
             <button type="button" onClick={() => setShowAdd(false)} className="px-4 py-2 rounded-lg text-sm text-muted-foreground hover:bg-muted">Cancel</button>
           </div>
@@ -720,15 +720,15 @@ function PipelinesSection({ pipelines, onRefresh }) {
       {pipelines.map((pipeline) => {
         const isEditing = editingId === pipeline._id;
         return (
-          <div key={pipeline._id} className="bg-card rounded-xl border border-border p-5">
+          <div key={pipeline._id} className="bg-card rounded-xl border border-border p-4 sm:p-5">
             {isEditing ? (
               <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <input type="text" value={editName} onChange={e => setEditName(e.target.value)} className="flex-1 px-3 py-1.5 rounded-lg bg-background border border-border text-sm font-semibold text-foreground focus:outline-none focus:border-primary" />
-                  <button onClick={saveEdit} disabled={savingEdit} className="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary disabled:opacity-50">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                  <input type="text" value={editName} onChange={e => setEditName(e.target.value)} className="flex-1 min-w-0 px-3 py-1.5 rounded-lg bg-background border border-border text-sm font-semibold text-foreground focus:outline-none focus:border-primary" />
+                  <button onClick={saveEdit} disabled={savingEdit} className="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary disabled:opacity-50 shrink-0">
                     <Save className="w-3.5 h-3.5 inline mr-1" />{savingEdit ? 'Saving...' : 'Save'}
                   </button>
-                  <button onClick={() => setEditingId(null)} className="text-xs text-muted-foreground/70 hover:text-muted-foreground">Cancel</button>
+                  <button onClick={() => setEditingId(null)} className="text-xs text-muted-foreground/70 hover:text-muted-foreground shrink-0">Cancel</button>
                 </div>
                 <div className="space-y-1.5">
                   {editStages.map((stage, idx) => (
@@ -750,7 +750,7 @@ function PipelinesSection({ pipelines, onRefresh }) {
                         onChange={e => { const u = [...editStages]; u[idx] = { ...u[idx], color: e.target.value }; setEditStages(u); }}
                         className="w-6 h-6 rounded border border-border cursor-pointer"
                       />
-                      <button onClick={() => removeStage(idx)} className="text-muted-foreground/40 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => removeStage(idx)} className="text-muted-foreground/40 hover:text-red-500 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                         <X className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -760,12 +760,12 @@ function PipelinesSection({ pipelines, onRefresh }) {
               </div>
             ) : (
               <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <h4 className="text-sm font-semibold text-foreground">{pipeline.name}</h4>
-                    {pipeline.isDefault && <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary font-medium">Default</span>}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <h4 className="text-sm font-semibold text-foreground truncate">{pipeline.name}</h4>
+                    {pipeline.isDefault && <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary font-medium shrink-0">Default</span>}
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 shrink-0">
                     <button onClick={() => startEdit(pipeline)} className="text-xs text-primary hover:underline flex items-center gap-0.5">
                       <Edit2 className="w-3 h-3" /> Edit
                     </button>
@@ -776,11 +776,11 @@ function PipelinesSection({ pipelines, onRefresh }) {
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 flex-wrap">
                   {[...pipeline.stages].sort((a, b) => a.order - b.order).map((stage, i) => (
                     <div key={i} className="flex items-center gap-1">
                       {i > 0 && <span className="text-muted-foreground/40 text-xs">→</span>}
-                      <span className="text-xs px-2 py-1 rounded-md border border-border" style={{ borderLeftColor: stage.color, borderLeftWidth: 3 }}>
+                      <span className="text-xs px-2 py-1 rounded-md border border-border whitespace-nowrap" style={{ borderLeftColor: stage.color, borderLeftWidth: 3 }}>
                         {stage.name}
                       </span>
                     </div>
@@ -823,19 +823,19 @@ function ApiKeySection({ org }) {
 
   return (
     <div className="space-y-4">
-      <div className="bg-card rounded-xl border border-border p-5">
+      <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
         <h3 className="text-sm font-semibold text-foreground mb-1">API Key</h3>
         <p className="text-xs text-muted-foreground mb-4">
           Use this key in the <code className="bg-muted px-1 py-0.5 rounded text-[10px]">x-api-key</code> header when calling the CRM from n8n or any external tool.
         </p>
         <div className="flex items-center gap-2">
-          <div className="flex-1 font-mono text-sm bg-background px-3 py-2.5 rounded-lg border border-border truncate text-foreground">
+          <div className="flex-1 min-w-0 font-mono text-sm bg-background px-3 py-2.5 rounded-lg border border-border truncate text-foreground">
             {visible ? (apiKey || 'No API key generated') : '•'.repeat(32)}
           </div>
-          <button onClick={() => setVisible(v => !v)} className="p-2 rounded-lg border border-border hover:bg-background transition-colors text-muted-foreground">
+          <button onClick={() => setVisible(v => !v)} className="p-2 rounded-lg border border-border hover:bg-background transition-colors text-muted-foreground shrink-0">
             {visible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           </button>
-          <button onClick={copy} disabled={!apiKey} className="p-2 rounded-lg border border-border hover:bg-background transition-colors text-muted-foreground disabled:opacity-50">
+          <button onClick={copy} disabled={!apiKey} className="p-2 rounded-lg border border-border hover:bg-background transition-colors text-muted-foreground disabled:opacity-50 shrink-0">
             {copied ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
           </button>
         </div>
@@ -844,15 +844,15 @@ function ApiKeySection({ org }) {
         </button>
       </div>
 
-      <div className="bg-card rounded-xl border border-border p-5">
+      <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
         <h3 className="text-sm font-semibold text-foreground mb-3">Webhook Endpoints</h3>
         <p className="text-xs text-muted-foreground mb-4">Use these endpoints from n8n, Zapier, or any HTTP client. All requests require the <code className="bg-muted px-1 py-0.5 rounded text-[10px]">x-api-key</code> header.</p>
 
-        <div className="bg-background rounded-lg p-4 space-y-3 border border-border">
+        <div className="bg-background rounded-lg p-3 sm:p-4 space-y-3 border border-border">
           <div>
             <p className="text-xs font-semibold text-foreground mb-1">n8n HTTP Request node setup:</p>
             <div className="space-y-1 text-xs text-muted-foreground">
-              <p>Header: <code className="text-foreground bg-muted px-1 rounded">x-api-key: {visible ? (apiKey || 'your-key') : '(click eye to reveal)'}</code></p>
+              <p className="break-all">Header: <code className="text-foreground bg-muted px-1 rounded">x-api-key: {visible ? (apiKey || 'your-key') : '(click eye to reveal)'}</code></p>
             </div>
           </div>
 
@@ -868,11 +868,11 @@ function ApiKeySection({ org }) {
                 { method: 'POST', path: '/api/webhooks/events', desc: 'Fire an automation trigger' },
               ].map((ep, i) => (
                 <div key={i} className="flex items-start gap-2">
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded mt-0.5 ${ep.method === 'GET' ? 'bg-green-100 text-green-700' : ep.method === 'POST' ? 'bg-blue-100 text-blue-700' : 'bg-primary/15 text-primary'}`}>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded mt-0.5 shrink-0 ${ep.method === 'GET' ? 'bg-green-100 text-green-700' : ep.method === 'POST' ? 'bg-blue-100 text-blue-700' : 'bg-primary/15 text-primary'}`}>
                     {ep.method}
                   </span>
-                  <div>
-                    <code className="text-xs text-foreground">{ep.path}</code>
+                  <div className="min-w-0">
+                    <code className="text-xs text-foreground break-all">{ep.path}</code>
                     <p className="text-[10px] text-muted-foreground/70">{ep.desc}</p>
                   </div>
                 </div>

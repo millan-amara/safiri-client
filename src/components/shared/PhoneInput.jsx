@@ -102,13 +102,13 @@ export default function PhoneInput({ value, onChange, className = '' }) {
   const currentCountry = COMMON_CODES.find(c => c.code === prefix);
 
   return (
-    <div className={`flex ${className}`} ref={dropRef}>
+    <div className={`flex w-full min-w-0 ${className}`} ref={dropRef}>
       {/* Prefix selector */}
-      <div className="relative">
+      <div className="relative shrink-0">
         <button
           type="button"
           onClick={() => { setOpen(!open); setSearch(''); }}
-          className="flex items-center gap-1 px-2 py-2 rounded-l-lg bg-muted border border-r-0 border-border text-xs text-foreground hover:bg-muted transition-colors h-full min-w-[72px]"
+          className="flex items-center gap-1 px-2 py-2 rounded-l-lg bg-muted border border-r-0 border-border text-xs text-foreground hover:bg-muted transition-colors h-full min-w-[72px] max-w-24"
         >
           {currentCountry && <span className="text-sm">{getFlag(currentCountry.country)}</span>}
           <span className="font-medium">{prefix}</span>

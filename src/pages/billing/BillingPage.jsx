@@ -240,25 +240,25 @@ export default function BillingPage() {
   return (
     <div className="space-y-8 animate-fade-in max-w-3xl">
       <div>
-        <h1 className="text-2xl font-bold text-foreground" style={{ fontFamily: 'Playfair Display, serif' }}>
+        <h1 className="text-xl sm:text-2xl font-bold text-foreground" style={{ fontFamily: 'Playfair Display, serif' }}>
           Billing &amp; Subscription
         </h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Manage your plan and payment details</p>
+        <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Manage your plan and payment details</p>
       </div>
 
       {/* Current plan card */}
-      <div className="bg-card border border-border rounded-xl p-6 space-y-4">
-        <div className="flex items-start justify-between gap-4">
-          <div>
+      <div className="bg-card border border-border rounded-xl p-4 sm:p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
+          <div className="min-w-0">
             <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium mb-1">Current plan</p>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <PlanBadge plan={plan} />
               <StatusBadge status={subscriptionStatus} />
               {billing.annual && <span className="text-[10px] uppercase font-bold text-green-700 bg-green-50 px-1.5 py-0.5 rounded">Annual</span>}
             </div>
           </div>
           {isPaidPlan && currentPeriodEnd && (
-            <div className="text-right">
+            <div className="text-left sm:text-right shrink-0">
               <p className="text-xs text-muted-foreground">
                 {subscriptionStatus === 'cancelled' ? 'Access until' : 'Renews'}
               </p>
@@ -270,7 +270,7 @@ export default function BillingPage() {
         </div>
 
         {plan === 'trial' && subscriptionStatus === 'trialing' && (
-          <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-border">
             <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
               <Clock className="w-4 h-4 text-amber-600 flex-shrink-0" />
               <div>
@@ -340,7 +340,7 @@ export default function BillingPage() {
                 : 'the end of your billing period'}
               . Your data is never deleted.
             </p>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <button
                 onClick={handleCancel}
                 disabled={cancelling}
@@ -362,11 +362,11 @@ export default function BillingPage() {
       {/* Plan picker */}
       {plan !== 'enterprise' && !pendingPlan && (
         <div>
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
             <h2 className="text-base font-semibold text-foreground">
               {isPaidPlan ? 'Change plan' : 'Choose your plan'}
             </h2>
-            <div className="inline-flex items-center bg-muted rounded-lg p-0.5 text-xs">
+            <div className="inline-flex items-center bg-muted rounded-lg p-0.5 text-xs self-start sm:self-auto">
               <button
                 onClick={() => setAnnual(false)}
                 className={`px-3 py-1 rounded-md font-medium transition-colors ${!annual ? 'bg-card shadow-sm text-foreground' : 'text-muted-foreground'}`}
@@ -382,7 +382,7 @@ export default function BillingPage() {
             </div>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 grid-cols-1 md:grid-cols-3">
             {selfServePlans.filter((p) => p.key !== plan).map((p) => {
               const isDowngrade = p.monthlyPriceKES < currentPriceKes;
               const actionLabel = isDowngrade ? 'Downgrade to' : 'Upgrade to';
@@ -452,7 +452,7 @@ export default function BillingPage() {
       )}
 
       {plan === 'enterprise' && (
-        <div className="bg-card border border-border rounded-xl p-6 text-center">
+        <div className="bg-card border border-border rounded-xl p-4 sm:p-6 text-center">
           <Sparkles className="w-8 h-8 text-primary mx-auto mb-2" />
           <p className="font-semibold text-foreground">Enterprise plan</p>
           <p className="text-xs text-muted-foreground mt-1">

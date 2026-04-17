@@ -100,24 +100,24 @@ export default function AutomationsPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-foreground" style={{ fontFamily: 'Playfair Display, serif' }}>Automations</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Automate your workflow so nothing slips through</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-foreground" style={{ fontFamily: 'Playfair Display, serif' }}>Automations</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Automate your workflow so nothing slips through</p>
         </div>
-        <button onClick={() => setShowBuilder(true)} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary transition-colors">
+        <button onClick={() => setShowBuilder(true)} className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary transition-colors self-start sm:self-auto">
           <Plus className="w-4 h-4" /> Custom Automation
         </button>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b border-border">
+      <div className="flex gap-1 border-b border-border overflow-x-auto">
         {[
           { id: 'my', label: 'My Automations', count: automations.length },
           { id: 'templates', label: 'Templates', count: templates.length },
         ].map(t => (
           <button key={t.id} onClick={() => setActiveTab(t.id)}
-            className={`px-4 py-2.5 text-sm font-medium transition-colors relative ${activeTab === t.id ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
+            className={`px-4 py-2.5 text-sm font-medium transition-colors relative whitespace-nowrap ${activeTab === t.id ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
             {t.label}
             {t.count > 0 && <span className={`ml-1.5 px-1.5 py-0.5 text-xs rounded-full ${activeTab === t.id ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'}`}>{t.count}</span>}
             {activeTab === t.id && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full" />}
@@ -137,7 +137,7 @@ export default function AutomationsPage() {
         ) : (
           <div className="space-y-3">
             {automations.map(auto => (
-              <div key={auto._id} className="bg-card rounded-xl border border-border p-5">
+              <div key={auto._id} className="bg-card rounded-xl border border-border p-4 sm:p-5">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-start gap-3 flex-1 min-w-0">
                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${auto.isActive ? 'bg-green-50' : 'bg-muted'}`}>
@@ -151,10 +151,10 @@ export default function AutomationsPage() {
                         </span>
                       </div>
                       <p className="text-xs text-muted-foreground mt-0.5">When: {TRIGGER_LABELS[auto.trigger?.type] || auto.trigger?.type}</p>
-                      <div className="flex items-center gap-2 mt-0.5">
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         {auto.actions?.map((a, i) => <span key={i} className="text-[10px] bg-background text-muted-foreground px-1.5 py-0.5 rounded border border-border">{ACTION_LABELS[a.type]}</span>)}
                       </div>
-                      <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground/70">
+                      <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground/70 flex-wrap">
                         {auto.runCount > 0 && <span className="flex items-center gap-1"><Play className="w-3 h-3" />{auto.runCount} runs</span>}
                         {auto.lastRunAt && <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{formatDate(auto.lastRunAt)}</span>}
                         {auto.lastRunStatus && <span className={`px-1.5 py-0.5 rounded text-[10px] ${auto.lastRunStatus === 'success' ? 'bg-green-50 text-green-600' : auto.lastRunStatus === 'failed' ? 'bg-red-50 text-red-500' : 'bg-primary/10 text-amber-600'}`}>{auto.lastRunStatus}</span>}
@@ -185,7 +185,7 @@ export default function AutomationsPage() {
               <input placeholder="Search templates..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                 className="w-full pl-9 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:border-primary" />
             </div>
-            <div className="flex gap-1">
+            <div className="flex gap-1 flex-wrap">
               {[{ id: 'all', label: 'All' }, ...Object.entries(CATEGORY_INFO).map(([id, info]) => ({ id, label: `${info.icon} ${info.title}` }))].map(cat => (
                 <button key={cat.id} onClick={() => setSelectedCategory(cat.id)}
                   className={`px-3 py-1.5 text-xs rounded-full transition-colors whitespace-nowrap ${selectedCategory === cat.id ? 'bg-primary text-white' : 'bg-muted text-muted-foreground hover:bg-muted'}`}>
@@ -211,7 +211,7 @@ export default function AutomationsPage() {
                 {catTemplates.map(template => {
                   const isActive = activeTemplateIds.includes(template.id);
                   return (
-                    <div key={template.id} className={`bg-card rounded-xl border p-4 transition-all ${isActive ? 'border-green-200 bg-green-50/20' : 'border-border hover:border-border'}`}>
+                    <div key={template.id} className={`bg-card rounded-xl border p-3 sm:p-4 transition-all ${isActive ? 'border-green-200 bg-green-50/20' : 'border-border hover:border-border'}`}>
                       <div className="flex items-start gap-3">
                         <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center text-xl flex-shrink-0">{template.icon}</div>
                         <div className="flex-1 min-w-0">
@@ -331,7 +331,7 @@ function ActivateModal({ template, team, pipelines, onClose, onActivated }) {
             {dealPipeline && <div><label className="block text-xs font-medium text-muted-foreground mb-1">Starting stage *</label><select value={stageId} onChange={e => setStageId(e.target.value)} className={inputCls}><option value="">Select...</option>{dealPipeline.stages.sort((a,b) => a.order - b.order).map(s => <option key={s.name} value={s.name}>{s.name}</option>)}</select></div>}
           </>)}
         </div>
-        <div className="flex gap-2 px-5 py-4 border-t border-border">
+        <div className="flex flex-wrap gap-2 px-5 py-4 border-t border-border">
           <button onClick={onClose} className="flex-1 px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-background">Cancel</button>
           <button onClick={handleActivate} disabled={saving || !name.trim() || (needsWebhook && !webhookUrl) || (needsAssignUser && !assignUserId)} className="flex-1 px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary disabled:opacity-50">{saving ? 'Activating...' : 'Activate'}</button>
         </div>
@@ -458,7 +458,7 @@ function BuilderModal({ team, pipelines, onClose, onCreated }) {
             </div>
           )}
         </div>
-        <div className="flex gap-2 px-5 py-4 border-t border-border">
+        <div className="flex flex-wrap gap-2 px-5 py-4 border-t border-border">
           {step > 1 && <button onClick={() => setStep(s => s - 1)} className="px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-background">Back</button>}
           <div className="flex-1" />
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-muted-foreground hover:bg-background">Cancel</button>

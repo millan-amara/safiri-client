@@ -26,8 +26,8 @@ export default function VerifyEmailPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <div className="bg-card rounded-xl shadow-sm border border-border p-8 max-w-md w-full text-center">
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <div className="bg-card rounded-xl shadow-sm border border-border p-6 sm:p-8 max-w-md w-full text-center">
         {success ? (
           <>
             <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">

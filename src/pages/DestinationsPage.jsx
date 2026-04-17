@@ -68,12 +68,12 @@ export default function DestinationsPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-foreground" style={{ fontFamily: 'Playfair Display, serif' }}>Destinations</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Manage destination images and metadata for quotes</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-foreground" style={{ fontFamily: 'Playfair Display, serif' }}>Destinations</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Manage destination images and metadata for quotes</p>
         </div>
-        <button onClick={() => setShowAdd(!showAdd)} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary transition-colors">
+        <button onClick={() => setShowAdd(!showAdd)} className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary transition-colors self-start sm:self-auto">
           <Plus className="w-4 h-4" /> Add Destination
         </button>
       </div>
@@ -135,36 +135,37 @@ export default function DestinationsPage() {
           return (
             <div key={dest._id} className={`bg-card rounded-xl border transition-colors ${isExpanded ? 'border-primary/30 shadow-sm' : 'border-border'}`}>
               {/* Header */}
-              <div className="flex items-center justify-between p-4 cursor-pointer" onClick={() => setExpanded(isExpanded ? null : dest._id)}>
-                <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${colorCls}`}>
+              <div className="flex items-center justify-between gap-2 p-3 sm:p-4 cursor-pointer" onClick={() => setExpanded(isExpanded ? null : dest._id)}>
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${colorCls}`}>
                     <Icon className="w-5 h-5" />
                   </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-foreground">{dest.name}</p>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-semibold text-foreground truncate">{dest.name}</p>
                       <span className={`text-[10px] px-1.5 py-0.5 rounded ${colorCls}`}>{dest.type}</span>
                     </div>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-muted-foreground truncate">
                       {dest.region && `${dest.region} · `}{dest.country}
                       {imageCount > 0 && ` · ${imageCount} image${imageCount !== 1 ? 's' : ''}`}
                       {dest.averageDaysNeeded && ` · ~${dest.averageDaysNeeded} days`}
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {imageCount === 0 && <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/15 text-primary">Needs images</span>}
+                <div className="flex items-center gap-2 shrink-0">
+                  {imageCount === 0 && <span className="hidden sm:inline text-[10px] px-2 py-0.5 rounded-full bg-primary/15 text-primary">Needs images</span>}
+                  {imageCount === 0 && <span className="sm:hidden w-2 h-2 rounded-full bg-primary" title="Needs images" />}
                   <ChevronDown className={`w-4 h-4 text-muted-foreground/70 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                 </div>
               </div>
 
               {/* Expanded */}
               {isExpanded && (
-                <div className="border-t border-border p-4 space-y-4">
+                <div className="border-t border-border p-3 sm:p-4 space-y-4">
                   {/* Edit mode */}
                   {isEditing ? (
                     <div className="space-y-3">
-                      <div className="grid grid-cols-3 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div><label className="block text-[10px] text-muted-foreground mb-0.5">Name</label><input type="text" value={editForm.name || ''} onChange={e => setEditForm({...editForm, name: e.target.value})} className={inputCls} /></div>
                         <div><label className="block text-[10px] text-muted-foreground mb-0.5">Region</label><input type="text" value={editForm.region || ''} onChange={e => setEditForm({...editForm, region: e.target.value})} className={inputCls} /></div>
                         <div><label className="block text-[10px] text-muted-foreground mb-0.5">Type</label>
@@ -174,7 +175,7 @@ export default function DestinationsPage() {
                         </div>
                       </div>
                       <div><label className="block text-[10px] text-muted-foreground mb-0.5">Description</label><textarea rows={2} value={editForm.description || ''} onChange={e => setEditForm({...editForm, description: e.target.value})} className={`${inputCls} resize-none`} /></div>
-                      <div className="grid grid-cols-3 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div><label className="block text-[10px] text-muted-foreground mb-0.5">Avg days needed</label><input type="number" value={editForm.averageDaysNeeded || ''} onChange={e => setEditForm({...editForm, averageDaysNeeded: parseInt(e.target.value) || 0})} className={inputCls} /></div>
                         <div><label className="block text-[10px] text-muted-foreground mb-0.5">Best months (1-12)</label><input type="text" value={editForm.bestMonths || ''} onChange={e => setEditForm({...editForm, bestMonths: e.target.value})} className={inputCls} placeholder="7,8,9,10" /></div>
                         <div><label className="block text-[10px] text-muted-foreground mb-0.5">Highlights</label><input type="text" value={editForm.highlights || ''} onChange={e => setEditForm({...editForm, highlights: e.target.value})} className={inputCls} placeholder="Big 5, Wildebeest" /></div>
@@ -185,8 +186,8 @@ export default function DestinationsPage() {
                       </div>
                     </div>
                   ) : (
-                    <div className="flex items-start justify-between">
-                      <div>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
                         {dest.description && <p className="text-xs text-muted-foreground leading-relaxed mb-2">{dest.description}</p>}
                         {dest.highlights?.length > 0 && (
                           <div className="flex flex-wrap gap-1 mb-2">
@@ -199,7 +200,7 @@ export default function DestinationsPage() {
                           </p>
                         )}
                       </div>
-                      <button onClick={() => { setEditing(dest._id); setEditForm({ name: dest.name, region: dest.region, type: dest.type, description: dest.description, averageDaysNeeded: dest.averageDaysNeeded, bestMonths: dest.bestMonths?.join(', ') || '', highlights: dest.highlights?.join(', ') || '' }); }} className="text-xs text-primary hover:underline flex items-center gap-0.5">
+                      <button onClick={() => { setEditing(dest._id); setEditForm({ name: dest.name, region: dest.region, type: dest.type, description: dest.description, averageDaysNeeded: dest.averageDaysNeeded, bestMonths: dest.bestMonths?.join(', ') || '', highlights: dest.highlights?.join(', ') || '' }); }} className="text-xs text-primary hover:underline flex items-center gap-0.5 shrink-0">
                         <Edit2 className="w-3 h-3" /> Edit
                       </button>
                     </div>
