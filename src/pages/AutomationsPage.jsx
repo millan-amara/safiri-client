@@ -13,6 +13,7 @@ const TRIGGER_LABELS = {
   'deal.won': '🏆 Deal is marked as won',
   'deal.lost': '💔 Deal is marked as lost',
   'contact.created': '👤 New contact is added',
+  'task.assigned': '📌 Task is assigned',
   'task.overdue': '⏰ Task becomes overdue',
   'deal.inactive': '❄️ Deal goes cold (no activity)',
   'quote.viewed': '👁️ Client views a quote',
@@ -113,7 +114,7 @@ export default function AutomationsPage() {
       <div className="flex gap-1 border-b border-border">
         {[
           { id: 'my', label: 'My Automations', count: automations.length },
-          { id: 'templates', label: 'Templates', count: templates.filter(t => t.category !== 'advanced').length },
+          { id: 'templates', label: 'Templates', count: templates.length },
         ].map(t => (
           <button key={t.id} onClick={() => setActiveTab(t.id)}
             className={`px-4 py-2.5 text-sm font-medium transition-colors relative ${activeTab === t.id ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
@@ -271,7 +272,8 @@ function ActivateModal({ template, team, pipelines, onClose, onActivated }) {
   const [name, setName] = useState(template.name);
   const [webhookUrl, setWebhookUrl] = useState('');
   const [assignUserId, setAssignUserId] = useState('');
-  const [pipelineId, setPipelineId] = useState('');
+  const [filterPipelineId, setFilterPipelineId] = useState('');
+  const [dealPipelineId, setDealPipelineId] = useState('');
   const [stageId, setStageId] = useState('');
   const [toStage, setToStage] = useState('');
   const [saving, setSaving] = useState(false);
@@ -280,7 +282,8 @@ function ActivateModal({ template, team, pipelines, onClose, onActivated }) {
   const needsAssignUser = template.actions.some(a => a.type === 'assign_to_user');
   const needsDealConfig = template.actions.some(a => a.type === 'create_deal');
   const needsStageFilter = template.trigger.type === 'deal.stage_changed';
-  const selectedPipeline = pipelines.find(p => p._id === pipelineId);
+  const filterPipeline = pipelines.find(p => p._id === filterPipelineId);
+  const dealPipeline = pipelines.find(p => p._id === dealPipelineId);
   const inputCls = 'w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors';
 
   const handleActivate = async () => {
@@ -289,11 +292,16 @@ function ActivateModal({ template, team, pipelines, onClose, onActivated }) {
       const actions = template.actions.map(a => {
         if (a.type === 'send_webhook') return { ...a, config: { ...a.config, url: webhookUrl } };
         if (a.type === 'assign_to_user') return { ...a, config: { ...a.config, userId: assignUserId } };
-        if (a.type === 'create_deal') return { ...a, config: { ...a.config, pipelineId, stageId } };
+        if (a.type === 'create_deal') return { ...a, config: { ...a.config, pipelineId: dealPipelineId, stageId } };
         return a;
       });
       const trigger = { ...template.trigger };
-      if (needsStageFilter && toStage) trigger.config = { ...trigger.config, toStage };
+      if (needsStageFilter) {
+        const cfg = { ...(trigger.config || {}) };
+        if (toStage) cfg.toStage = toStage;
+        if (filterPipelineId) cfg.pipelineId = filterPipelineId;
+        trigger.config = cfg;
+      }
       await api.post('/automations', { templateId: template.id, name, actions, trigger });
       onActivated();
     } catch (err) { toast.error(err.response?.data?.message || 'Failed'); }
@@ -313,14 +321,14 @@ function ActivateModal({ template, team, pipelines, onClose, onActivated }) {
           </div>
           <div><label className="block text-xs font-medium text-muted-foreground mb-1">Automation name</label><input type="text" value={name} onChange={e => setName(e.target.value)} className={inputCls} /></div>
           {needsStageFilter && (<>
-            <div><label className="block text-xs font-medium text-muted-foreground mb-1">Pipeline</label><select value={pipelineId} onChange={e => { setPipelineId(e.target.value); setToStage(''); }} className={inputCls}><option value="">Select...</option>{pipelines.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}</select></div>
-            {selectedPipeline && <div><label className="block text-xs font-medium text-muted-foreground mb-1">Fire when deal moves to</label><select value={toStage} onChange={e => setToStage(e.target.value)} className={inputCls}><option value="">Any stage</option>{selectedPipeline.stages.sort((a,b) => a.order - b.order).map(s => <option key={s.name} value={s.name}>{s.name}</option>)}</select></div>}
+            <div><label className="block text-xs font-medium text-muted-foreground mb-1">Pipeline</label><select value={filterPipelineId} onChange={e => { setFilterPipelineId(e.target.value); setToStage(''); }} className={inputCls}><option value="">Any pipeline</option>{pipelines.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}</select></div>
+            {filterPipeline && <div><label className="block text-xs font-medium text-muted-foreground mb-1">Fire when deal moves to</label><select value={toStage} onChange={e => setToStage(e.target.value)} className={inputCls}><option value="">Any stage</option>{filterPipeline.stages.sort((a,b) => a.order - b.order).map(s => <option key={s.name} value={s.name}>{s.name}</option>)}</select></div>}
           </>)}
           {needsWebhook && <div><label className="block text-xs font-medium text-muted-foreground mb-1">Webhook URL *</label><input type="url" value={webhookUrl} onChange={e => setWebhookUrl(e.target.value)} className={inputCls} placeholder="https://your-n8n.com/webhook/..." /></div>}
           {needsAssignUser && <div><label className="block text-xs font-medium text-muted-foreground mb-1">Assign to *</label><select value={assignUserId} onChange={e => setAssignUserId(e.target.value)} className={inputCls}><option value="">Select...</option>{team.map(m => <option key={m._id} value={m._id}>{m.name}</option>)}</select></div>}
           {needsDealConfig && (<>
-            <div><label className="block text-xs font-medium text-muted-foreground mb-1">Pipeline *</label><select value={pipelineId} onChange={e => { setPipelineId(e.target.value); setStageId(''); }} className={inputCls}><option value="">Select...</option>{pipelines.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}</select></div>
-            {selectedPipeline && <div><label className="block text-xs font-medium text-muted-foreground mb-1">Starting stage *</label><select value={stageId} onChange={e => setStageId(e.target.value)} className={inputCls}><option value="">Select...</option>{selectedPipeline.stages.sort((a,b) => a.order - b.order).map(s => <option key={s.name} value={s.name}>{s.name}</option>)}</select></div>}
+            <div><label className="block text-xs font-medium text-muted-foreground mb-1">Pipeline *</label><select value={dealPipelineId} onChange={e => { setDealPipelineId(e.target.value); setStageId(''); }} className={inputCls}><option value="">Select...</option>{pipelines.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}</select></div>
+            {dealPipeline && <div><label className="block text-xs font-medium text-muted-foreground mb-1">Starting stage *</label><select value={stageId} onChange={e => setStageId(e.target.value)} className={inputCls}><option value="">Select...</option>{dealPipeline.stages.sort((a,b) => a.order - b.order).map(s => <option key={s.name} value={s.name}>{s.name}</option>)}</select></div>}
           </>)}
         </div>
         <div className="flex gap-2 px-5 py-4 border-t border-border">
@@ -334,19 +342,35 @@ function ActivateModal({ template, team, pipelines, onClose, onActivated }) {
 
 // ─── Custom Builder Modal ───────────────────────
 
+const ACTION_DEFAULTS = {
+  send_email: { to: 'assigned_user', subject: '', body: '' },
+  send_notification: { message: '', targetUser: 'assigned_user' },
+  send_whatsapp: { whatsappTo: 'contact', whatsappMessage: '' },
+  send_webhook: { url: '', method: 'POST', payload: 'full_context' },
+  create_task: { taskTitle: '', taskPriority: 'medium', taskDueDays: 1, assignTo: 'same_as_contact' },
+  create_deal: { dealTitle: '', pipelineId: '', stageId: '', assignDealTo: 'same_as_contact' },
+  assign_to_user: { userId: '' },
+  add_tag: { tag: '' },
+};
+
 function BuilderModal({ team, pipelines, onClose, onCreated }) {
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState({ name: '', triggerType: 'contact.created', inactiveDays: 3, toStage: '', pipelineId: '', actionType: 'create_task', actionConfig: {} });
+  const [form, setForm] = useState({ name: '', triggerType: 'contact.created', inactiveDays: 3, toStage: '', pipelineId: '', actionType: 'create_task', actionConfig: { ...ACTION_DEFAULTS.create_task } });
   const [saving, setSaving] = useState(false);
   const inputCls = 'w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors';
   const selectedPipeline = pipelines.find(p => p._id === form.pipelineId);
+  const triggerHasDeal = ['deal.stage_changed', 'deal.created', 'deal.won', 'deal.lost', 'deal.inactive', 'quote.viewed', 'quote.sent'].includes(form.triggerType);
+  const setActionType = (t) => setForm(f => ({ ...f, actionType: t, actionConfig: { ...(ACTION_DEFAULTS[t] || {}) } }));
 
   const handleCreate = async () => {
     setSaving(true);
     try {
       const triggerConfig = {};
       if (form.triggerType === 'deal.inactive') triggerConfig.inactiveDays = parseInt(form.inactiveDays);
-      if (form.triggerType === 'deal.stage_changed' && form.toStage) triggerConfig.toStage = form.toStage;
+      if (form.triggerType === 'deal.stage_changed') {
+        if (form.toStage) triggerConfig.toStage = form.toStage;
+        if (form.pipelineId) triggerConfig.pipelineId = form.pipelineId;
+      }
       await api.post('/automations', { name: form.name, trigger: { type: form.triggerType, config: triggerConfig }, actions: [{ type: form.actionType, config: form.actionConfig }] });
       onCreated();
     } catch (err) { toast.error(err.response?.data?.message || 'Failed'); }
@@ -384,7 +408,7 @@ function BuilderModal({ team, pipelines, onClose, onCreated }) {
           {step === 2 && (<>
             <div><label className="block text-xs font-medium text-muted-foreground mb-2">Then do this:</label>
               <div className="space-y-1 mb-3">{Object.entries(ACTION_LABELS).map(([v, l]) => (
-                <button key={v} type="button" onClick={() => setForm({...form, actionType: v, actionConfig: {}})} className={`w-full p-2.5 rounded-lg border text-left text-xs transition-all ${form.actionType === v ? 'border-primary bg-primary/10/50 font-medium text-foreground' : 'border-border text-muted-foreground hover:border-border'}`}>{l}</button>
+                <button key={v} type="button" onClick={() => setActionType(v)} className={`w-full p-2.5 rounded-lg border text-left text-xs transition-all ${form.actionType === v ? 'border-primary bg-primary/10/50 font-medium text-foreground' : 'border-border text-muted-foreground hover:border-border'}`}>{l}</button>
               ))}</div>
             </div>
             <div className="border-t border-border pt-3">
@@ -394,7 +418,7 @@ function BuilderModal({ team, pipelines, onClose, onCreated }) {
                   <div><label className="block text-[10px] text-muted-foreground mb-0.5">Priority</label><select value={form.actionConfig.taskPriority || 'medium'} onChange={e => setForm({...form, actionConfig: {...form.actionConfig, taskPriority: e.target.value}})} className={inputCls}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></div>
                   <div><label className="block text-[10px] text-muted-foreground mb-0.5">Due in (days)</label><input type="number" min={0} value={form.actionConfig.taskDueDays ?? 1} onChange={e => setForm({...form, actionConfig: {...form.actionConfig, taskDueDays: parseInt(e.target.value)}})} className={inputCls} /></div>
                 </div>
-                <div><label className="block text-[10px] text-muted-foreground mb-0.5">Assign to</label><select value={form.actionConfig.assignTo || 'same_as_deal'} onChange={e => setForm({...form, actionConfig: {...form.actionConfig, assignTo: e.target.value}})} className={inputCls}><option value="same_as_deal">Deal owner</option><option value="same_as_contact">Contact owner</option></select></div>
+                <div><label className="block text-[10px] text-muted-foreground mb-0.5">Assign to</label><select value={form.actionConfig.assignTo || (triggerHasDeal ? 'same_as_deal' : 'same_as_contact')} onChange={e => setForm({...form, actionConfig: {...form.actionConfig, assignTo: e.target.value}})} className={inputCls}>{triggerHasDeal && <option value="same_as_deal">Deal owner</option>}<option value="same_as_contact">Contact owner</option>{team.map(m => <option key={m._id} value={m._id}>{m.name}</option>)}</select></div>
               </div>)}
               {form.actionType === 'send_email' && (<div className="space-y-2">
                 <div><label className="block text-[10px] text-muted-foreground mb-0.5">Send to</label><select value={form.actionConfig.to || 'assigned_user'} onChange={e => setForm({...form, actionConfig: {...form.actionConfig, to: e.target.value}})} className={inputCls}><option value="assigned_user">Assigned rep</option><option value="contact">Contact</option></select></div>
