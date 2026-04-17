@@ -22,6 +22,7 @@ const TRIGGER_LABELS = {
 const ACTION_LABELS = {
   send_email: '✉️ Send email',
   send_notification: '🔔 In-app notification',
+  send_whatsapp: '💬 Send WhatsApp message',
   send_webhook: '🔗 Send to n8n / webhook',
   create_task: '✅ Create task',
   create_deal: '💼 Open new deal',
@@ -401,12 +402,28 @@ function BuilderModal({ team, pipelines, onClose, onCreated }) {
                 <div><label className="block text-[10px] text-muted-foreground mb-0.5">Body</label><textarea rows={3} value={form.actionConfig.body || ''} onChange={e => setForm({...form, actionConfig: {...form.actionConfig, body: e.target.value}})} className={`${inputCls} resize-none`} /></div>
               </div>)}
               {form.actionType === 'send_webhook' && <div><label className="block text-[10px] text-muted-foreground mb-0.5">Webhook URL</label><input type="url" value={form.actionConfig.url || ''} onChange={e => setForm({...form, actionConfig: {...form.actionConfig, url: e.target.value}})} className={inputCls} placeholder="https://..." /></div>}
+              {form.actionType === 'send_whatsapp' && (<div className="space-y-2">
+                <div><label className="block text-[10px] text-muted-foreground mb-0.5">Send to</label><select value={form.actionConfig.whatsappTo || 'contact'} onChange={e => setForm({...form, actionConfig: {...form.actionConfig, whatsappTo: e.target.value}})} className={inputCls}><option value="contact">Contact</option><option value="assigned_user">Assigned rep</option></select></div>
+                <div><label className="block text-[10px] text-muted-foreground mb-0.5">Message</label><textarea rows={3} value={form.actionConfig.whatsappMessage || ''} onChange={e => setForm({...form, actionConfig: {...form.actionConfig, whatsappMessage: e.target.value}})} className={`${inputCls} resize-none`} placeholder="Hi {{contact.firstName}}, thanks for reaching out!" /></div>
+                <p className="text-[10px] text-muted-foreground/70">You can use {'{{contact.firstName}}'}, {'{{deal.title}}'} etc.</p>
+              </div>)}
               {form.actionType === 'send_notification' && (<div className="space-y-2">
                 <div><label className="block text-[10px] text-muted-foreground mb-0.5">Message</label><input type="text" value={form.actionConfig.message || ''} onChange={e => setForm({...form, actionConfig: {...form.actionConfig, message: e.target.value}})} className={inputCls} /></div>
                 <div><label className="block text-[10px] text-muted-foreground mb-0.5">Notify</label><select value={form.actionConfig.targetUser || 'assigned_user'} onChange={e => setForm({...form, actionConfig: {...form.actionConfig, targetUser: e.target.value}})} className={inputCls}><option value="assigned_user">Assigned rep</option><option value="creator">Creator</option></select></div>
               </div>)}
               {form.actionType === 'assign_to_user' && <div><label className="block text-[10px] text-muted-foreground mb-0.5">Assign to</label><select value={form.actionConfig.userId || ''} onChange={e => setForm({...form, actionConfig: {...form.actionConfig, userId: e.target.value}})} className={inputCls}><option value="">Select...</option>{team.map(m => <option key={m._id} value={m._id}>{m.name}</option>)}</select></div>}
               {form.actionType === 'add_tag' && <div><label className="block text-[10px] text-muted-foreground mb-0.5">Tag</label><input type="text" value={form.actionConfig.tag || ''} onChange={e => setForm({...form, actionConfig: {...form.actionConfig, tag: e.target.value}})} className={inputCls} placeholder="e.g. vip" /></div>}
+              {form.actionType === 'create_deal' && (() => {
+                const actionPipeline = pipelines.find(p => p._id === form.actionConfig.pipelineId)
+                  || pipelines.find(p => p.isDefault)
+                  || pipelines[0];
+                return (<div className="space-y-2">
+                  <div><label className="block text-[10px] text-muted-foreground mb-0.5">Deal title</label><input type="text" value={form.actionConfig.dealTitle || ''} onChange={e => setForm({...form, actionConfig: {...form.actionConfig, dealTitle: e.target.value}})} className={inputCls} placeholder="New deal: {{contact.firstName}} {{contact.lastName}}" /></div>
+                  <div><label className="block text-[10px] text-muted-foreground mb-0.5">Pipeline</label><select value={form.actionConfig.pipelineId || ''} onChange={e => setForm({...form, actionConfig: {...form.actionConfig, pipelineId: e.target.value, stageId: ''}})} className={inputCls}><option value="">Default pipeline</option>{pipelines.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}</select></div>
+                  {actionPipeline && <div><label className="block text-[10px] text-muted-foreground mb-0.5">Starting stage</label><select value={form.actionConfig.stageId || ''} onChange={e => setForm({...form, actionConfig: {...form.actionConfig, stageId: e.target.value}})} className={inputCls}><option value="">First stage</option>{actionPipeline.stages.sort((a,b) => a.order - b.order).map(s => <option key={s.name} value={s.name}>{s.name}</option>)}</select></div>}
+                  <div><label className="block text-[10px] text-muted-foreground mb-0.5">Assign deal to</label><select value={form.actionConfig.assignDealTo || 'same_as_contact'} onChange={e => setForm({...form, actionConfig: {...form.actionConfig, assignDealTo: e.target.value}})} className={inputCls}><option value="same_as_contact">Contact owner</option>{team.map(m => <option key={m._id} value={m._id}>{m.name}</option>)}</select></div>
+                </div>);
+              })()}
             </div>
           </>)}
           {step === 3 && (
