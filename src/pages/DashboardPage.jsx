@@ -6,7 +6,7 @@ import { formatCurrency, formatDate } from '../utils/helpers';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, AreaChart, Area } from 'recharts';
 import {
   Users, FileText, CheckSquare, TrendingUp,
-  ArrowUpRight, Clock, Plus, ArrowRight, Target,
+  ArrowUpRight, Clock, ArrowRight, Target,
   Calendar, ChevronRight, Briefcase, Building2, Star,
   Layers,
 } from 'lucide-react';
@@ -76,27 +76,19 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6 sm:space-y-8 max-w-[1440px] mx-auto pb-12 animate-fade-in">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-        <div className="space-y-1 min-w-0">
-          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">
-            {greeting}, {firstName}
-          </h1>
-          <p className="text-xs sm:text-sm text-muted-foreground">
-            <span className="hidden sm:inline">Dashboard overview · </span>
-            <span className="sm:hidden">
-              {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-            </span>
-            <span className="hidden sm:inline">
-              {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-            </span>
-          </p>
-        </div>
-        <Link
-          to="/quotes/new"
-          className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity shadow-sm self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" /> New quote
-        </Link>
+      <div className="space-y-1">
+        <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">
+          {greeting}, {firstName}
+        </h1>
+        <p className="text-xs sm:text-sm text-muted-foreground">
+          <span className="hidden sm:inline">Dashboard overview · </span>
+          <span className="sm:hidden">
+            {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+          </span>
+          <span className="hidden sm:inline">
+            {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+          </span>
+        </p>
       </div>
 
       {/* KPI Cards */}
