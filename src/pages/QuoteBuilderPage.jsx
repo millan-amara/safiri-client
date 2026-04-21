@@ -1801,7 +1801,7 @@ function DayImagePicker({ hotels, destinations, currentLocation, currentHotel, o
     setStockLoading(true);
     setStockError('');
     try {
-      const { data } = await api.get('/library/stock/search', { params: { q, perPage: 24 } });
+      const { data } = await api.get('/library/stock/search', { params: { q, perPage: 50 } });
       setStockItems(data.items || []);
       if ((data.items || []).length === 0) setStockError(`No stock photos found for "${q}".`);
     } catch (err) {
@@ -1844,12 +1844,12 @@ function DayImagePicker({ hotels, destinations, currentLocation, currentHotel, o
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="bg-card rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col animate-scale-in">
-        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-border flex items-center justify-between flex-shrink-0">
           <h3 className="text-base font-semibold text-foreground">Add Image</h3>
           <button onClick={onClose} className="text-muted-foreground/70 hover:text-muted-foreground"><X className="w-4 h-4" /></button>
         </div>
 
-        <div className="flex gap-1 px-5 pt-3 border-b border-border overflow-x-auto">
+        <div className="flex gap-1 px-5 pt-3 border-b border-border overflow-x-auto flex-shrink-0">
           {[
             { id: 'upload', label: 'Upload' },
             { id: 'destination', label: `Destination${destImages.length ? ` (${destImages.length})` : ''}` },

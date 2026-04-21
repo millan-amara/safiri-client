@@ -405,7 +405,7 @@ import TransportModal from '../components/partners/TransportModal';
 import ActivityModal from '../components/partners/ActivityModal';
 import {
   Hotel, Truck, Ticket, Upload, Plus, Search, Edit2, Trash2,
-  X, ChevronDown, Star, MapPin, DollarSign, Filter,
+  X, ChevronDown, Star, MapPin, DollarSign, Filter, Lock,
 } from 'lucide-react';
 
 const TABS = [
@@ -515,6 +515,9 @@ export default function PartnersPage() {
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
             {stats.hotels || 0} hotels · {stats.transport || 0} transport · {stats.activities || 0} activities across {stats.destinations || 0} destinations
+          </p>
+          <p className="text-[11px] text-muted-foreground/70 mt-1 inline-flex items-center gap-1" title="Your suppliers and rates are scoped to your organization. No other SafiriPro user can see this data.">
+            <Lock className="w-3 h-3" /> Private to your organization — only your team can see these
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
