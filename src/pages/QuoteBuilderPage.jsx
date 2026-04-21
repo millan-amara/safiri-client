@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
-import { formatCurrency } from '../utils/helpers';
+import { formatCurrency, cldThumb } from '../utils/helpers';
 import toast from 'react-hot-toast';
 import QuoteRenderer from '../components/quote/QuoteRenderer';
 import {
@@ -1766,10 +1766,16 @@ function DayImagePicker({ hotels, destinations, currentLocation, currentHotel, o
   const [libraryItems, setLibraryItems] = useState([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
 
+  // Resolve the day's destination early so we can pass its type as a library fallback filter.
+  const matchedDest = destinations?.find(d => currentLocation && d.name.toLowerCase().includes(currentLocation.toLowerCase()));
+  const destType = matchedDest?.type;
+
   const fetchLibrary = async (q) => {
     setLibraryLoading(true);
     try {
-      const { data } = await api.get('/library/search', { params: { q, limit: 60 } });
+      const params = { q, limit: 60 };
+      if (destType) params.type = destType;
+      const { data } = await api.get('/library/search', { params });
       setLibraryItems(data);
     } catch { setLibraryItems([]); }
     finally { setLibraryLoading(false); }
@@ -1808,8 +1814,7 @@ function DayImagePicker({ hotels, destinations, currentLocation, currentHotel, o
   hotels.filter(h => !currentLocation || h.destination?.toLowerCase().includes(currentLocation.toLowerCase()))
     .forEach(h => h.images?.forEach(img => hotelImages.push({ ...img, hotelName: h.name })));
 
-  // Destination images
-  const matchedDest = destinations?.find(d => currentLocation && d.name.toLowerCase().includes(currentLocation.toLowerCase()));
+  // Destination images (matchedDest resolved above)
   const destImages = matchedDest?.images || [];
 
   return (
@@ -1909,7 +1914,7 @@ function DayImagePicker({ hotels, destinations, currentLocation, currentHotel, o
                   {libraryItems.map(img => (
                     <button key={img._id} onClick={() => pickLibrary(img)} title={img.credit || img.caption || ''}
                       className="aspect-square rounded-lg overflow-hidden border border-border hover:border-primary transition-colors relative group">
-                      <img src={img.url} alt="" className="w-full h-full object-cover" />
+                      <img src={cldThumb(img.url, 300)} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
                       {img.credit && (
                         <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[8px] px-1 py-0.5 truncate opacity-0 group-hover:opacity-100">
                           {img.credit}

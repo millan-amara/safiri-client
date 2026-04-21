@@ -2,6 +2,14 @@ import { clsx } from 'clsx';
 
 export const cn = (...inputs) => clsx(inputs);
 
+// Insert Cloudinary delivery transforms so we don't ship full-resolution originals to grid thumbnails.
+// Works only on Cloudinary secure_urls containing `/upload/`; other URLs pass through unchanged.
+export const cldThumb = (url, width = 400) => {
+  if (!url || typeof url !== 'string') return url;
+  if (!url.includes('/upload/') || !url.includes('res.cloudinary.com')) return url;
+  return url.replace('/upload/', `/upload/w_${width},c_fill,q_auto,f_auto/`);
+};
+
 export const formatCurrency = (amount, currency = 'USD') => {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',

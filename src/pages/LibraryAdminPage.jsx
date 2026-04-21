@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../utils/api';
+import { cldThumb } from '../utils/helpers';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { Upload, Trash2, Image as ImageIcon, Search, Link as LinkIcon, Check, X } from 'lucide-react';
@@ -165,7 +166,7 @@ export default function LibraryAdminPage() {
           {items.map(item => (
             <div key={item._id} className="bg-card border border-border rounded-lg overflow-hidden group relative">
               <div className="aspect-video bg-muted">
-                <img src={item.url} alt={item.caption} className="w-full h-full object-cover" />
+                <img src={cldThumb(item.url, 500)} alt={item.caption} loading="lazy" decoding="async" className="w-full h-full object-cover" />
               </div>
               <div className="p-2 space-y-1">
                 <div className="flex flex-wrap gap-1">

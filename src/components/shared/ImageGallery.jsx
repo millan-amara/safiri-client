@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
 import api from '../../utils/api';
+import { cldThumb } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 import { Image, Upload, Trash2, Star, X, GripVertical, Plus } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
@@ -103,8 +104,10 @@ export default function ImageGallery({ entityType, entityId, images = [], onUpda
             {images.map((img, i) => (
               <div key={i} className="relative group">
                 <img
-                  src={img.url}
+                  src={cldThumb(img.url, 150)}
                   alt={img.caption || ''}
+                  loading="lazy"
+                  decoding="async"
                   className={`w-14 h-14 object-cover rounded-md cursor-pointer ${img.isHero ? 'ring-2 ring-primary' : 'border border-border'}`}
                   onClick={() => setViewImage(img)}
                 />
@@ -125,7 +128,7 @@ export default function ImageGallery({ entityType, entityId, images = [], onUpda
         {viewImage && (
           <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setViewImage(null)}>
             <div className="relative w-full max-w-2xl max-h-[80vh]" onClick={e => e.stopPropagation()}>
-              <img src={viewImage.url} alt={viewImage.caption} className="max-w-full max-h-[80vh] mx-auto object-contain rounded-lg" />
+              <img src={cldThumb(viewImage.url, 1600)} alt={viewImage.caption} decoding="async" className="max-w-full max-h-[80vh] mx-auto object-contain rounded-lg" />
               <button onClick={() => setViewImage(null)} className="absolute top-2 right-2 w-10 h-10 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-black/70">
                 <X className="w-4 h-4" />
               </button>
@@ -181,7 +184,7 @@ export default function ImageGallery({ entityType, entityId, images = [], onUpda
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {images.map((img, i) => (
             <div key={i} className="relative group rounded-lg overflow-hidden border border-border">
-              <img src={img.url} alt={img.caption || ''} className="w-full h-24 object-cover" />
+              <img src={cldThumb(img.url, 300)} alt={img.caption || ''} loading="lazy" decoding="async" className="w-full h-24 object-cover" />
               <div className="absolute inset-0 bg-black/40 flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-100">
                 <button
                   type="button"
