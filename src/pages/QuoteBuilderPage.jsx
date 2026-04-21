@@ -1766,6 +1766,11 @@ function DayImagePicker({ hotels, destinations, currentLocation, currentHotel, o
   const [libraryItems, setLibraryItems] = useState([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
 
+  const [stockQuery, setStockQuery] = useState(currentLocation || '');
+  const [stockItems, setStockItems] = useState([]);
+  const [stockLoading, setStockLoading] = useState(false);
+  const [stockError, setStockError] = useState('');
+
   // Resolve the day's destination early so we can pass its type as a library fallback filter.
   const matchedDest = destinations?.find(d => currentLocation && d.name.toLowerCase().includes(currentLocation.toLowerCase()));
   const destType = matchedDest?.type;
@@ -1783,11 +1788,30 @@ function DayImagePicker({ hotels, destinations, currentLocation, currentHotel, o
 
   useEffect(() => {
     if (tab === 'library' && libraryItems.length === 0) fetchLibrary(libraryQuery);
+    if (tab === 'stock' && stockItems.length === 0 && stockQuery.trim()) fetchStock(stockQuery);
   }, [tab]);
 
   const pickLibrary = (img) => {
     api.post(`/library/${img._id}/used`).catch(() => {});
     onPick({ url: img.url, source: 'library', caption: img.caption, credit: img.credit, creditUrl: img.sourceUrl });
+  };
+
+  const fetchStock = async (q) => {
+    if (!q.trim()) { setStockItems([]); return; }
+    setStockLoading(true);
+    setStockError('');
+    try {
+      const { data } = await api.get('/library/stock/search', { params: { q, perPage: 24 } });
+      setStockItems(data.items || []);
+      if ((data.items || []).length === 0) setStockError(`No stock photos found for "${q}".`);
+    } catch (err) {
+      setStockItems([]);
+      setStockError(err?.response?.data?.message || 'Stock photo search failed.');
+    } finally { setStockLoading(false); }
+  };
+
+  const pickStock = (img) => {
+    onPick({ url: img.url, source: 'pexels', caption: img.caption, credit: img.credit ? `Photo by ${img.credit} on Pexels` : 'Pexels', creditUrl: img.creditUrl });
   };
 
   const handleUpload = async (e) => {
@@ -1831,6 +1855,7 @@ function DayImagePicker({ hotels, destinations, currentLocation, currentHotel, o
             { id: 'destination', label: `Destination${destImages.length ? ` (${destImages.length})` : ''}` },
             { id: 'hotels', label: `Hotels${hotelImages.length ? ` (${hotelImages.length})` : ''}` },
             { id: 'library', label: 'Library' },
+            { id: 'stock', label: 'Stock' },
             { id: 'url', label: 'URL' },
           ].map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
@@ -1923,6 +1948,52 @@ function DayImagePicker({ hotels, destinations, currentLocation, currentHotel, o
                     </button>
                   ))}
                 </div>
+              )}
+            </div>
+          )}
+
+          {tab === 'stock' && (
+            <div className="space-y-3">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={stockQuery}
+                  onChange={e => setStockQuery(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && fetchStock(stockQuery)}
+                  placeholder="Search stock photos (e.g. masai mara, diani beach, elephant)"
+                  className="flex-1 px-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:border-primary"
+                />
+                <button onClick={() => fetchStock(stockQuery)} className="px-3 py-2 rounded-lg bg-primary text-white text-xs font-medium">
+                  Search
+                </button>
+              </div>
+              {stockLoading ? (
+                <div className="flex justify-center py-8"><div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>
+              ) : stockError ? (
+                <div className="text-center py-8 text-sm text-muted-foreground/70">{stockError}</div>
+              ) : stockItems.length === 0 ? (
+                <div className="text-center py-8 text-sm text-muted-foreground/70">
+                  Search for destination, activity, or wildlife photos.
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {stockItems.map(img => (
+                      <button key={img.id} onClick={() => pickStock(img)} title={img.credit ? `Photo by ${img.credit}` : ''}
+                        className="aspect-square rounded-lg overflow-hidden border border-border hover:border-primary transition-colors relative group">
+                        <img src={img.thumbnail} alt={img.caption || ''} loading="lazy" decoding="async" className="w-full h-full object-cover" />
+                        {img.credit && (
+                          <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[8px] px-1 py-0.5 truncate opacity-0 group-hover:opacity-100">
+                            {img.credit}
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/60 text-center pt-1">
+                    Photos provided by <a href="https://www.pexels.com" target="_blank" rel="noreferrer" className="underline">Pexels</a>
+                  </p>
+                </>
               )}
             </div>
           )}
