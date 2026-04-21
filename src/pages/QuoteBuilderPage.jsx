@@ -1436,6 +1436,22 @@ function DayCard({
   const [showActivityPicker, setShowActivityPicker] = useState(false);
   const [showImagePicker, setShowImagePicker] = useState(false);
 
+  // When a day expands, any other expanded day collapses above it — which
+  // shifts this card upward in the document and leaves the scroll position
+  // showing the middle/bottom of the new content. Scroll the card back into
+  // view so the header lands near the top. Skip on initial mount so users
+  // aren't jumped to day 0 when the page first loads.
+  const cardRef = useRef(null);
+  const didMountRef = useRef(false);
+  useEffect(() => {
+    if (!didMountRef.current) { didMountRef.current = true; return; }
+    if (isExpanded && cardRef.current) {
+      requestAnimationFrame(() => {
+        cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
+  }, [isExpanded]);
+
   const matchedHotels = hotels.filter(h => !day.location || h.destination?.toLowerCase().includes(day.location.toLowerCase()));
   const matchedActivities = activities.filter(a => !day.location || a.destination?.toLowerCase().includes(day.location.toLowerCase()));
 
@@ -1450,7 +1466,7 @@ function DayCard({
         </div>
       )}
 
-      <div className={`bg-card rounded-xl border transition-all ${isExpanded ? 'border-primary/40 shadow-sm' : 'border-border hover:border-border'} ${day.isTransitDay ? 'border-dashed' : ''}`}>
+      <div ref={cardRef} className={`bg-card rounded-xl border scroll-mt-20 transition-all ${isExpanded ? 'border-primary/40 shadow-sm' : 'border-border hover:border-border'} ${day.isTransitDay ? 'border-dashed' : ''}`}>
         {/* Day header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 sm:p-4 cursor-pointer" onClick={onToggle}>
           <div className="flex items-center gap-3 min-w-0 flex-1">

@@ -3,7 +3,7 @@ import api from '../utils/api';
 import { cldThumb } from '../utils/helpers';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
-import { Upload, Trash2, Image as ImageIcon, Search, Link as LinkIcon, Check, X } from 'lucide-react';
+import { Upload, Trash2, Image as ImageIcon, Search, Link as LinkIcon, Check, X, Pencil } from 'lucide-react';
 
 const TYPES = ['other', 'safari', 'beach', 'city', 'mountain', 'lake', 'cultural', 'adventure'];
 
@@ -16,6 +16,10 @@ export default function LibraryAdminPage() {
   const [form, setForm] = useState({ mode: 'file', url: '', tags: '', caption: '', credit: '', sourceUrl: '', destinationType: 'other' });
   const [file, setFile] = useState(null);
   const [saving, setSaving] = useState(false);
+
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({ tags: '', caption: '', credit: '', destinationType: 'other' });
+  const [editSaving, setEditSaving] = useState(false);
 
   const fetchItems = async () => {
     setLoading(true);
@@ -75,6 +79,30 @@ export default function LibraryAdminPage() {
       await api.put(`/library/admin/${item._id}`, { isActive: !item.isActive });
       fetchItems();
     } catch { toast.error('Update failed'); }
+  };
+
+  const startEdit = (item) => {
+    setEditingId(item._id);
+    setEditForm({
+      tags: (item.tags || []).join(', '),
+      caption: item.caption || '',
+      credit: item.credit || '',
+      destinationType: item.destinationType || 'other',
+    });
+  };
+
+  const cancelEdit = () => { setEditingId(null); };
+
+  const saveEdit = async (id) => {
+    setEditSaving(true);
+    try {
+      await api.put(`/library/admin/${id}`, editForm);
+      toast.success('Updated');
+      setEditingId(null);
+      fetchItems();
+    } catch (e) {
+      toast.error(e.response?.data?.message || 'Update failed');
+    } finally { setEditSaving(false); }
   };
 
   const remove = async (id) => {
@@ -169,24 +197,70 @@ export default function LibraryAdminPage() {
                 <img src={cldThumb(item.url, 500)} alt={item.caption} loading="lazy" decoding="async" className="w-full h-full object-cover" />
               </div>
               <div className="p-2 space-y-1">
-                <div className="flex flex-wrap gap-1">
-                  {item.tags.slice(0, 4).map(t => (
-                    <span key={t} className="text-[10px] px-1.5 py-0.5 bg-muted rounded">{t}</span>
-                  ))}
-                </div>
-                {item.caption && <p className="text-xs truncate">{item.caption}</p>}
-                <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                  <span>{item.destinationType} · used {item.usageCount}×</span>
-                  <div className="flex gap-1">
-                    <button onClick={() => toggleActive(item)} title={item.isActive ? 'Deactivate' : 'Activate'}
-                      className="p-1 hover:bg-muted rounded">
-                      {item.isActive ? <Check className="w-3 h-3 text-green-600" /> : <X className="w-3 h-3 text-muted-foreground" />}
-                    </button>
-                    <button onClick={() => remove(item._id)} className="p-1 hover:bg-muted rounded">
-                      <Trash2 className="w-3 h-3 text-red-600" />
-                    </button>
+                {editingId === item._id ? (
+                  <div className="space-y-1.5">
+                    <input
+                      placeholder="Tags (comma-separated)"
+                      value={editForm.tags}
+                      onChange={e => setEditForm({ ...editForm, tags: e.target.value })}
+                      className="w-full px-2 py-1 rounded bg-background border border-border text-[11px] focus:outline-none focus:border-primary"
+                    />
+                    <input
+                      placeholder="Caption"
+                      value={editForm.caption}
+                      onChange={e => setEditForm({ ...editForm, caption: e.target.value })}
+                      className="w-full px-2 py-1 rounded bg-background border border-border text-[11px] focus:outline-none focus:border-primary"
+                    />
+                    <input
+                      placeholder="Credit"
+                      value={editForm.credit}
+                      onChange={e => setEditForm({ ...editForm, credit: e.target.value })}
+                      className="w-full px-2 py-1 rounded bg-background border border-border text-[11px] focus:outline-none focus:border-primary"
+                    />
+                    <select
+                      value={editForm.destinationType}
+                      onChange={e => setEditForm({ ...editForm, destinationType: e.target.value })}
+                      className="w-full px-2 py-1 rounded bg-background border border-border text-[11px] focus:outline-none focus:border-primary"
+                    >
+                      {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <div className="flex gap-1 pt-1">
+                      <button onClick={() => saveEdit(item._id)} disabled={editSaving}
+                        className="flex-1 py-1 rounded bg-primary text-white text-[11px] font-medium hover:opacity-90 disabled:opacity-50">
+                        {editSaving ? 'Saving…' : 'Save'}
+                      </button>
+                      <button onClick={cancelEdit} disabled={editSaving}
+                        className="flex-1 py-1 rounded border border-border text-[11px] font-medium hover:bg-muted">
+                        Cancel
+                      </button>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap gap-1">
+                      {item.tags.slice(0, 4).map(t => (
+                        <span key={t} className="text-[10px] px-1.5 py-0.5 bg-muted rounded">{t}</span>
+                      ))}
+                    </div>
+                    {item.caption && <p className="text-xs truncate">{item.caption}</p>}
+                    <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                      <span>{item.destinationType} · used {item.usageCount}×</span>
+                      <div className="flex gap-1">
+                        <button onClick={() => startEdit(item)} title="Edit tags/caption"
+                          className="p-1 hover:bg-muted rounded">
+                          <Pencil className="w-3 h-3 text-muted-foreground" />
+                        </button>
+                        <button onClick={() => toggleActive(item)} title={item.isActive ? 'Deactivate' : 'Activate'}
+                          className="p-1 hover:bg-muted rounded">
+                          {item.isActive ? <Check className="w-3 h-3 text-green-600" /> : <X className="w-3 h-3 text-muted-foreground" />}
+                        </button>
+                        <button onClick={() => remove(item._id)} className="p-1 hover:bg-muted rounded">
+                          <Trash2 className="w-3 h-3 text-red-600" />
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           ))}

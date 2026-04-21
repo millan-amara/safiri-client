@@ -79,6 +79,21 @@ const STYLE_PRESETS = {
 
 export default function QuoteRenderer({ quote, token, previewMode = false }) {
   const [activeDay, setActiveDay] = useState(0);
+
+  // Toggling a day collapses any other expanded day simultaneously; that
+  // shifts the clicked card upward in the document, leaving the user scrolled
+  // past its header. Scroll the newly-opened card into view. Skip the initial
+  // mount so visitors aren't yanked past the cover to day 0 on page load.
+  const dayRefs = useRef({});
+  const didMountDayScroll = useRef(false);
+  useEffect(() => {
+    if (!didMountDayScroll.current) { didMountDayScroll.current = true; return; }
+    if (activeDay >= 0 && dayRefs.current[activeDay]) {
+      requestAnimationFrame(() => {
+        dayRefs.current[activeDay]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
+  }, [activeDay]);
   const [lightbox, setLightbox] = useState(null); // { images, index }
   const heroRef = useRef(null);
 
@@ -376,7 +391,8 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
           {days.map((day, i) => (
             <div
               key={i}
-              className={`rounded-2xl overflow-hidden border transition-all ${
+              ref={el => { dayRefs.current[i] = el; }}
+              className={`rounded-2xl overflow-hidden border scroll-mt-6 transition-all ${
                 activeDay === i ? 'border-stone-300 shadow-md' : 'border-stone-200'
               }`}
             >
