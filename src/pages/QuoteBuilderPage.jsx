@@ -27,6 +27,8 @@ export default function QuoteBuilderPage() {
     endDate: '',
     startPoint: 'Nairobi',
     endPoint: 'Nairobi',
+    clientType: 'retail',        // retail | contract | resident
+    nationality: 'nonResident',  // citizen | resident | nonResident — for park fees
     days: [],
     coverImage: null,
     pricing: {
@@ -60,11 +62,13 @@ export default function QuoteBuilderPage() {
   const [hotels, setHotels] = useState([]);
   const [activities, setActivities] = useState([]);
   const [transport, setTransport] = useState([]);
+  const [packages, setPackages] = useState([]);
   const [contacts, setContacts] = useState([]);
   const [destinations, setDestinations] = useState([]);
   const [expandedDay, setExpandedDay] = useState(0);
   const [showPreview, setShowPreview] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showPackagePicker, setShowPackagePicker] = useState(false);
 
   // Load partner data
   useEffect(() => {
@@ -72,16 +76,90 @@ export default function QuoteBuilderPage() {
       api.get('/partners/hotels'),
       api.get('/partners/activities'),
       api.get('/partners/transport'),
+      api.get('/partners/packages'),
       api.get('/crm/contacts'),
       api.get('/destinations'),
-    ]).then(([h, a, t, c, d]) => {
+    ]).then(([h, a, t, p, c, d]) => {
       setHotels(h.data.hotels);
       setActivities(a.data.activities);
       setTransport(t.data.transport);
+      setPackages(p.data.packages || []);
       setContacts(c.data.contacts);
       setDestinations(d.data.destinations);
     });
   }, []);
+
+  // Apply a package: populates quote.days from its segments and adds a single
+  // line item for the package's priced total (flat-price, no markup — the
+  // operator can override in the line-items editor if they want).
+  const applyPackage = async (pkg) => {
+    if (quote.days?.length > 0 && !confirm('This will replace your current itinerary. Continue?')) return;
+    try {
+      const { data } = await api.post(`/partners/packages/${pkg._id}/price`, {
+        adults: quote.travelers.adults,
+        childAges: quote.travelers.childAges || [],
+        quoteCurrency: quote.pricing.currency,
+        clientType: quote.clientType,
+      });
+      if (!data.ok) {
+        toast.error(`Can't price package: ${data.reason}`);
+        return;
+      }
+      const days = [];
+      const dur = pkg.durationDays || (pkg.durationNights ? pkg.durationNights + 1 : pkg.segments?.length || 1);
+      for (let i = 1; i <= dur; i++) {
+        const seg = (pkg.segments || []).find(s => i >= (s.startDay || 1) && i <= (s.endDay || 1));
+        const hotelName = seg?.hotelName || seg?.hotel?.name || '';
+        days.push({
+          dayNumber: i,
+          title: seg?.location ? `Day ${i} — ${seg.location}` : `Day ${i}`,
+          location: seg?.location || '',
+          isTransitDay: false,
+          narrative: seg?.notes || '',
+          meals: { breakfast: pkg.pricing?.mealPlan && pkg.pricing.mealPlan !== 'RO', lunch: false, dinner: false, notes: '' },
+          hotel: hotelName ? {
+            hotelId: seg?.hotel?._id || seg?.hotel || null,
+            name: hotelName,
+            description: '',
+            images: [],
+            ratePerNight: 0,
+            ratePerNightInQuoteCurrency: 0,
+            sourceCurrency: pkg.pricing?.currency,
+            mealPlan: pkg.pricing?.mealPlan,
+            rateListName: `${pkg.name} (package)`,
+          } : null,
+          roomType: '',
+          activities: [],
+          transport: null,
+          images: [],
+          dayCost: 0,   // package is flat-priced; per-day cost tracked as one line item
+        });
+      }
+      setQuote({
+        ...quote,
+        title: quote.title || pkg.name,
+        days,
+        inclusions: [...new Set([...(quote.inclusions || []), ...((data.inclusions || []))])],
+        exclusions: [...new Set([...(quote.exclusions || []), ...((data.exclusions || []))])],
+        pricing: {
+          ...quote.pricing,
+          lineItems: [
+            ...(quote.pricing.lineItems || []),
+            {
+              description: `${pkg.name} — ${data.tier.minPax}-${data.tier.maxPax} pax package (${quote.travelers.adults} adult${quote.travelers.adults === 1 ? '' : 's'}${data.childAges.length ? ', ' + data.childAges.length + ' child' + (data.childAges.length === 1 ? '' : 'ren') : ''})`,
+              quantity: 1,
+              unitPrice: Math.round(data.subtotalInQuoteCurrency),
+              total: Math.round(data.subtotalInQuoteCurrency),
+            },
+          ],
+        },
+      });
+      setShowPackagePicker(false);
+      toast.success(`Applied "${pkg.name}" — ${dur} days`);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to apply package');
+    }
+  };
 
   // Load existing quote
   useEffect(() => {
@@ -158,9 +236,10 @@ export default function QuoteBuilderPage() {
     const days = [...quote.days];
     days[index] = { ...days[index], ...updates };
 
-    // Auto-calc day cost
+    // Auto-calc day cost. Prefer the quote-currency rate (converted via FX
+    // at hotel-pick time) over the raw source-currency rate.
     const day = days[index];
-    const hotelCost = day.hotel?.ratePerNight || 0;
+    const hotelCost = day.hotel?.ratePerNightInQuoteCurrency || day.hotel?.ratePerNight || 0;
     const actCost = day.activities?.reduce((s, a) => s + (a.totalCost || 0), 0) || 0;
     const transCost = day.transport?.totalCost || 0;
     days[index].dayCost = hotelCost + actCost + transCost;
@@ -195,19 +274,73 @@ export default function QuoteBuilderPage() {
     setExpandedDay(index + 1);
   };
 
-  const selectHotelForDay = (dayIndex, hotel, rate) => {
-    updateDay(dayIndex, {
-      hotel: {
-        hotelId: hotel._id,
-        name: hotel.name,
-        roomType: rate.roomType,
-        ratePerNight: rate.ratePerNight,
-        mealPlan: rate.mealPlan,
-        images: hotel.images || [],
-        description: hotel.description,
-      },
-      roomType: rate.roomType,
-    });
+  // Pick a hotel for a day and let the server's rate resolver compute the
+  // nightly cost against the quote's clientType + party + currency. Falls
+  // back to a thin snapshot if pricing can't be resolved.
+  const selectHotelForDay = async (dayIndex, hotel, opts = {}) => {
+    const checkIn = quote.startDate ? new Date(quote.startDate) : new Date();
+    checkIn.setDate(checkIn.getDate() + dayIndex);
+    const checkOut = new Date(checkIn);
+    checkOut.setDate(checkOut.getDate() + 1);
+
+    const baseSnapshot = {
+      hotelId: hotel._id,
+      name: hotel.name,
+      images: hotel.images || [],
+      description: hotel.description,
+    };
+
+    try {
+      const { data } = await api.post(`/partners/hotels/${hotel._id}/price-stay`, {
+        checkIn: checkIn.toISOString(),
+        checkOut: checkOut.toISOString(),
+        adults: quote.travelers.adults,
+        childAges: quote.travelers.childAges || [],
+        clientType: quote.clientType,
+        nationality: quote.nationality,
+        preferredMealPlan: opts.preferredMealPlan,
+        preferredRoomType: opts.preferredRoomType,
+        quoteCurrency: quote.pricing.currency,
+      });
+
+      if (data.ok) {
+        const night = data.nightly?.[0] || {};
+        updateDay(dayIndex, {
+          hotel: {
+            ...baseSnapshot,
+            rateListId: data.rateList._id,
+            rateListName: data.rateList.name,
+            audienceApplied: data.rateList.audience,
+            mealPlan: data.rateList.mealPlan,
+            mealPlanLabel: data.rateList.mealPlanLabel,
+            sourceCurrency: data.sourceCurrency,
+            fxRate: data.fxRate,
+            roomType: data.roomType,
+            seasonLabel: night.season,
+            ratePerNight: night.total || 0,
+            ratePerNightInQuoteCurrency: (night.total || 0) * (data.fxRate || 1),
+            supplements: night.supplements || [],
+            passThroughFees: data.passThroughFees,
+            addOns: data.addOns,
+            cancellationTiers: data.cancellationTiers,
+            depositPct: data.depositPct,
+            warnings: data.warnings,
+          },
+          roomType: data.roomType || '',
+        });
+        if (data.warnings?.length) {
+          data.warnings.slice(0, 2).forEach(w => toast(w, { icon: '⚠️' }));
+        }
+      } else {
+        updateDay(dayIndex, {
+          hotel: { ...baseSnapshot, ratePerNight: 0, ratePerNightInQuoteCurrency: 0, warnings: [data.reason] },
+        });
+        toast.error(`No rate resolved: ${data.reason || 'unknown'}`);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Pricing failed');
+      updateDay(dayIndex, { hotel: { ...baseSnapshot, ratePerNight: 0, ratePerNightInQuoteCurrency: 0 } });
+    }
   };
 
   const addActivityToDay = (dayIndex, activity) => {
@@ -470,7 +603,37 @@ export default function QuoteBuilderPage() {
                   <option value="EUR">EUR (€)</option>
                   <option value="GBP">GBP (£)</option>
                   <option value="KES">KES (KSh)</option>
+                  <option value="TZS">TZS</option>
+                  <option value="UGX">UGX</option>
                 </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Client Type</label>
+                <select
+                  value={quote.clientType}
+                  onChange={(e) => setQuote({ ...quote, clientType: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
+                >
+                  <option value="retail">Retail (public rack)</option>
+                  <option value="contract">Contract (DMC / agent / STO)</option>
+                  <option value="resident">Resident (EAC / citizen)</option>
+                </select>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Drives which supplier rate sheet we pull from.</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Nationality (for park fees)</label>
+                <select
+                  value={quote.nationality}
+                  onChange={(e) => setQuote({ ...quote, nationality: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
+                >
+                  <option value="nonResident">International (non-resident)</option>
+                  <option value="resident">East African resident</option>
+                  <option value="citizen">Citizen</option>
+                </select>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Applied to tiered park/community fees.</p>
               </div>
             </div>
             <div className="mt-4">
@@ -576,7 +739,7 @@ export default function QuoteBuilderPage() {
                 destinations={destinations}
                 currency={quote.pricing.currency}
                 marginPercent={quote.pricing.marginPercent}
-                onSelectHotel={(hotel, rate) => selectHotelForDay(idx, hotel, rate)}
+                onSelectHotel={(hotel) => selectHotelForDay(idx, hotel)}
                 onAddActivity={(activity) => addActivityToDay(idx, activity)}
                 onRemoveActivity={(actIdx) => removeActivityFromDay(idx, actIdx)}
                 onAddImage={(image) => addImageToDay(idx, image)}
@@ -591,12 +754,62 @@ export default function QuoteBuilderPage() {
                 <div className="w-8 flex justify-center"><div className="w-0.5 h-4 bg-border" /></div>
               </div>
             )}
-            <button
-              onClick={() => addDay()}
-              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-border text-sm text-muted-foreground hover:border-primary hover:text-primary transition-colors"
-            >
-              <Plus className="w-4 h-4" /> Add Day
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => addDay()}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-border text-sm text-muted-foreground hover:border-primary hover:text-primary transition-colors"
+              >
+                <Plus className="w-4 h-4" /> Add Day
+              </button>
+              {packages.length > 0 && (
+                <button
+                  onClick={() => setShowPackagePicker(true)}
+                  className="px-4 py-3 rounded-xl border-2 border-dashed border-border text-sm text-muted-foreground hover:border-primary hover:text-primary transition-colors whitespace-nowrap"
+                  title="Apply a pre-built package (fills days + adds line item)"
+                >
+                  From Package
+                </button>
+              )}
+            </div>
+
+            {showPackagePicker && (
+              <div className="fixed inset-0 bg-black/40 z-50 flex items-start justify-center p-4 pt-[10vh]" onClick={() => setShowPackagePicker(false)}>
+                <div onClick={e => e.stopPropagation()} className="bg-card rounded-xl shadow-xl w-full max-w-xl max-h-[80vh] flex flex-col">
+                  <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                    <h3 className="text-base font-semibold text-foreground">Apply a Package</h3>
+                    <button onClick={() => setShowPackagePicker(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                  </div>
+                  <div className="p-4 overflow-y-auto space-y-2">
+                    {packages.map(p => {
+                      const startTier = p.pricing?.paxTiers?.[0];
+                      return (
+                        <button
+                          key={p._id}
+                          onClick={() => applyPackage(p)}
+                          className="w-full text-left p-3 rounded-lg border border-border hover:border-primary hover:bg-muted/30 transition-colors"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-semibold text-foreground">{p.name}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                {p.destination || '—'}
+                                {p.durationDays > 0 && ` · ${p.durationDays} days / ${p.durationNights} nights`}
+                                {p.pricing?.audience?.length > 0 && ` · ${p.pricing.audience.join('/')}`}
+                              </p>
+                            </div>
+                            {startTier && (
+                              <span className="text-xs font-bold text-foreground whitespace-nowrap">
+                                from {formatCurrency(startTier.pricePerPerson, p.pricing?.currency)}/pp
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* End point */}
             <div className="flex items-center gap-3 px-2 pt-2">
@@ -891,6 +1104,12 @@ function AIPanel({ quote, setQuote, destinations }) {
         tripLength: parseInt(tripLength) || undefined,
         travelers: quote.travelers.adults + quote.travelers.children,
         budget: draftBudget,
+        startDate: quote.startDate || undefined,
+        adults: quote.travelers.adults,
+        childAges: quote.travelers.childAges || [],
+        clientType: quote.clientType,
+        nationality: quote.nationality,
+        quoteCurrency: quote.pricing.currency,
       });
 
       setQuote({
@@ -1264,13 +1483,26 @@ function LineItemsEditor({ lineItems, onChange, segments, marginPercent, currenc
 
     for (const seg of segments) {
       // Hotel
-      if (seg.hotel?.name && seg.hotel.ratePerNight > 0) {
+      const nightly = seg.hotel?.ratePerNightInQuoteCurrency || seg.hotel?.ratePerNight || 0;
+      if (seg.hotel?.name && nightly > 0) {
         items.push({
           description: `${seg.hotel.name} — ${seg.hotel.roomType || 'Standard'} (${seg.nights} night${seg.nights !== 1 ? 's' : ''})`,
           quantity: seg.nights,
-          unitPrice: Math.round(seg.hotel.ratePerNight * markup),
-          total: Math.round(seg.hotel.ratePerNight * seg.nights * markup),
+          unitPrice: Math.round(nightly * markup),
+          total: Math.round(nightly * seg.nights * markup),
         });
+      }
+      // Pass-through fees (Mara Reserve, community, etc.) — always their
+      // own line. Shown at cost (markup=1) since they're pass-through.
+      for (const fee of (seg.hotel?.passThroughFees || [])) {
+        if ((fee.amountInQuoteCurrency || 0) > 0 && fee.mandatory !== false) {
+          items.push({
+            description: `${fee.name}${seg.destination ? ' — ' + seg.destination : ''}`,
+            quantity: 1,
+            unitPrice: Math.round(fee.amountInQuoteCurrency),
+            total: Math.round(fee.amountInQuoteCurrency),
+          });
+        }
       }
 
       // Activities
@@ -1610,7 +1842,17 @@ function DayCard({
                   {day.hotel.images?.[0]?.url && <img src={day.hotel.images[0].url} alt="" className="w-12 h-12 rounded-md object-cover" />}
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-foreground truncate">{day.hotel.name}</p>
-                    <p className="text-[10px] text-muted-foreground">{day.hotel.roomType} · {formatCurrency(day.hotel.ratePerNight, currency)}/night</p>
+                    <p className="text-[10px] text-muted-foreground truncate">
+                      {day.hotel.roomType || '—'}
+                      {day.hotel.mealPlan && ` · ${day.hotel.mealPlan}`}
+                      {day.hotel.seasonLabel && ` · ${day.hotel.seasonLabel}`}
+                      {` · ${formatCurrency(day.hotel.ratePerNightInQuoteCurrency || day.hotel.ratePerNight, currency)}/night`}
+                    </p>
+                    {day.hotel.rateListName && (
+                      <p className="text-[10px] text-muted-foreground/70 truncate">
+                        {day.hotel.rateListName} ({(day.hotel.audienceApplied || []).join(', ')})
+                      </p>
+                    )}
                   </div>
                   <button onClick={() => setShowHotelPicker(true)} className="text-[10px] text-primary hover:underline">Change</button>
                 </div>
@@ -1624,19 +1866,35 @@ function DayCard({
                 <div className="mt-2 p-3 rounded-lg bg-background border border-border max-h-64 overflow-y-auto space-y-1.5">
                   {matchedHotels.length === 0 ? (
                     <p className="text-xs text-muted-foreground/70 text-center py-2">No hotels for this location. Add some in Partners.</p>
-                  ) : matchedHotels.map(h => (
-                    <div key={h._id} className="bg-card rounded p-2 border border-border">
-                      <p className="text-xs font-medium text-foreground">{h.name}</p>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {h.rates?.map((r, ri) => (
-                          <button key={ri} onClick={() => { onSelectHotel(h, r); setShowHotelPicker(false); }}
-                            className="text-[10px] px-2 py-0.5 rounded bg-primary/10 hover:bg-primary/15 text-primary border border-amber-100">
-                            {r.roomType} · {formatCurrency(r.ratePerNight, currency)}
+                  ) : matchedHotels.map(h => {
+                    // Preview: show every active rate list's label so operator
+                    // can see audience/meal plan options before clicking.
+                    const activeLists = (h.rateLists || []).filter(l => l.isActive !== false);
+                    return (
+                      <div key={h._id} className="bg-card rounded p-2 border border-border">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-medium text-foreground truncate">{h.name}</p>
+                          <button
+                            onClick={() => { onSelectHotel(h); setShowHotelPicker(false); }}
+                            className="text-[10px] px-2 py-0.5 rounded bg-primary text-white hover:opacity-90 shrink-0"
+                          >
+                            Select
                           </button>
-                        ))}
+                        </div>
+                        {activeLists.length > 0 ? (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {activeLists.map((l, li) => (
+                              <span key={li} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                                {l.name} · {(l.audience || []).join('/')} · {l.currency} · {l.mealPlan}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-[10px] text-muted-foreground/70 mt-1">No rate lists configured</p>
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   <button onClick={() => setShowHotelPicker(false)} className="text-[10px] text-muted-foreground/70 hover:underline w-full text-right pt-1">Close</button>
                 </div>
               )}

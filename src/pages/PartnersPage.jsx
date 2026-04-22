@@ -403,20 +403,22 @@ import toast from 'react-hot-toast';
 import HotelModal from '../components/partners/HotelModal';
 import TransportModal from '../components/partners/TransportModal';
 import ActivityModal from '../components/partners/ActivityModal';
+import PackageModal from '../components/partners/PackageModal';
 import {
   Hotel, Truck, Ticket, Upload, Plus, Search, Edit2, Trash2,
-  X, ChevronDown, Star, MapPin, DollarSign, Filter, Lock,
+  X, ChevronDown, Star, MapPin, DollarSign, Filter, Lock, Map, Download,
 } from 'lucide-react';
 
 const TABS = [
   { id: 'hotels', label: 'Hotels', icon: Hotel },
   { id: 'transport', label: 'Transport', icon: Truck },
   { id: 'activities', label: 'Activities', icon: Ticket },
+  { id: 'packages', label: 'Packages', icon: Map },
 ];
 
 export default function PartnersPage() {
   const [tab, setTab] = useState('hotels');
-  const [data, setData] = useState({ hotels: [], transport: [], activities: [] });
+  const [data, setData] = useState({ hotels: [], transport: [], activities: [], packages: [] });
   const [stats, setStats] = useState({});
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -428,16 +430,18 @@ export default function PartnersPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [hotels, transport, activities, statsRes] = await Promise.all([
+      const [hotels, transport, activities, packages, statsRes] = await Promise.all([
         api.get('/partners/hotels'),
         api.get('/partners/transport'),
         api.get('/partners/activities'),
+        api.get('/partners/packages'),
         api.get('/partners/stats'),
       ]);
       setData({
         hotels: hotels.data.hotels,
         transport: transport.data.transport,
         activities: activities.data.activities,
+        packages: packages.data.packages,
       });
       setStats(statsRes.data);
     } catch (err) {
@@ -496,6 +500,10 @@ export default function PartnersPage() {
       !search || a.name.toLowerCase().includes(search.toLowerCase()) ||
       a.destination.toLowerCase().includes(search.toLowerCase())
     ),
+    packages: (data.packages || []).filter(p =>
+      !search || p.name.toLowerCase().includes(search.toLowerCase()) ||
+      (p.destination || '').toLowerCase().includes(search.toLowerCase())
+    ),
   };
 
   // Group hotels by destination
@@ -529,6 +537,28 @@ export default function PartnersPage() {
             className="hidden"
           />
           <button
+            onClick={async () => {
+              try {
+                const res = await api.get('/partners/import/template', { responseType: 'blob' });
+                const url = window.URL.createObjectURL(new Blob([res.data]));
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = 'safiripro-import-template.xlsx';
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                window.URL.revokeObjectURL(url);
+              } catch (err) {
+                toast.error('Could not download template');
+              }
+            }}
+            className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg bg-card border border-border text-foreground text-xs sm:text-sm font-medium hover:border-border transition-colors"
+            title="Download a blank template with example rows"
+          >
+            <Download className="w-4 h-4" />
+            <span className="hidden xs:inline">Template</span>
+          </button>
+          <button
             onClick={() => fileRef.current?.click()}
             disabled={importing}
             className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg bg-card border border-border text-foreground text-xs sm:text-sm font-medium hover:border-border transition-colors disabled:opacity-50"
@@ -541,7 +571,7 @@ export default function PartnersPage() {
             onClick={() => { setEditItem(null); setShowAddModal(true); }}
             className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg bg-primary text-white text-xs sm:text-sm font-medium hover:bg-primary transition-colors"
           >
-            <Plus className="w-4 h-4" /> Add {tab === 'hotels' ? 'Hotel' : tab === 'transport' ? 'Transport' : 'Activity'}
+            <Plus className="w-4 h-4" /> Add {tab === 'hotels' ? 'Hotel' : tab === 'transport' ? 'Transport' : tab === 'activities' ? 'Activity' : 'Package'}
           </button>
         </div>
       </div>
@@ -691,6 +721,53 @@ export default function PartnersPage() {
               ))}
             </div>
           )}
+
+          {/* PACKAGES TAB */}
+          {tab === 'packages' && (
+            <div className="grid gap-3">
+              {filtered.packages.length === 0 ? (
+                <EmptyState icon={Map} title="No packages" description="Add multi-day trails/packaged trips with pax-tiered pricing" />
+              ) : filtered.packages.map((p) => {
+                const startTier = p.pricing?.paxTiers?.[0];
+                return (
+                  <div key={p._id} className="bg-card rounded-xl border border-border p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 group hover:border-border transition-colors">
+                    <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
+                      <div className="w-10 h-10 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
+                        <Map className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-foreground truncate">{p.name}</p>
+                        <p className="text-xs text-muted-foreground line-clamp-2 sm:truncate">
+                          {p.destination || '—'}
+                          {p.durationNights > 0 && ` · ${p.durationNights} night${p.durationNights === 1 ? '' : 's'}`}
+                          {p.segments?.length > 0 && ` · ${p.segments.length} camp${p.segments.length === 1 ? '' : 's'}`}
+                          {p.pricing?.audience?.length > 0 && ` · ${p.pricing.audience.join('/')}`}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4 shrink-0">
+                      <div className="sm:text-right">
+                        {startTier && (
+                          <p className="text-sm font-bold text-foreground tabular-nums">
+                            from {formatCurrency(startTier.pricePerPerson, p.pricing?.currency)}/pp
+                          </p>
+                        )}
+                        <p className="text-[10px] text-muted-foreground/70">{p.pricing?.paxTiers?.length || 0} tier{p.pricing?.paxTiers?.length === 1 ? '' : 's'}</p>
+                      </div>
+                      <div className="flex gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => { setEditItem(p); setShowAddModal(true); }} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground/70 hover:text-foreground transition-colors">
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => handleDelete('packages', p._id)} className="p-1.5 rounded-md hover:bg-red-50 text-muted-foreground/70 hover:text-red-500 transition-colors">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </>
       )}
 
@@ -703,6 +780,9 @@ export default function PartnersPage() {
       )}
       {showAddModal && tab === 'activities' && (
         <ActivityModal item={editItem} onClose={() => { setShowAddModal(false); setEditItem(null); }} onSaved={fetchData} />
+      )}
+      {showAddModal && tab === 'packages' && (
+        <PackageModal item={editItem} onClose={() => { setShowAddModal(false); setEditItem(null); }} onSaved={fetchData} />
       )}
     </div>
   );
@@ -730,7 +810,7 @@ function HotelCard({ hotel, onDelete, onEdit }) {
               )}
             </div>
             <p className="text-xs text-muted-foreground truncate">
-              {hotel.location && `${hotel.location} · `}{hotel.rates?.length || 0} rate{hotel.rates?.length !== 1 ? 's' : ''} · {hotel.currency}
+              {hotel.location && `${hotel.location} · `}{hotel.rateLists?.length || 0} rate list{hotel.rateLists?.length !== 1 ? 's' : ''} · {hotel.currency}
             </p>
           </div>
         </div>
@@ -747,36 +827,71 @@ function HotelCard({ hotel, onDelete, onEdit }) {
         </div>
       </div>
 
-      {expanded && hotel.rates?.length > 0 && (
-        <div className="border-t border-border px-3 sm:px-4 py-3 overflow-x-auto">
-          <table className="w-full text-xs min-w-[520px]">
+      {expanded && hotel.rateLists?.length > 0 && (
+        <div className="border-t border-border px-3 sm:px-4 py-3 space-y-2.5">
+          {hotel.rateLists.filter(l => l.isActive !== false).map((list, i) => (
+            <RateListSummary key={list._id || i} list={list} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Compact summary of one rate list — header (name/audience/currency/meal plan/validity)
+// + per-season cheapest pricing.
+function RateListSummary({ list }) {
+  const validity = list.validFrom || list.validTo
+    ? `${list.validFrom ? new Date(list.validFrom).toLocaleDateString() : '…'} → ${list.validTo ? new Date(list.validTo).toLocaleDateString() : '…'}`
+    : 'No validity set';
+
+  return (
+    <div className="rounded-lg border border-border/60 bg-background">
+      <div className="px-3 py-2 flex items-center gap-2 flex-wrap border-b border-border/40">
+        <span className="text-sm font-semibold text-foreground">{list.name}</span>
+        {(list.audience || []).map(a => (
+          <span key={a} className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/10 text-primary uppercase">{a}</span>
+        ))}
+        <span className="px-1.5 py-0.5 rounded text-[10px] bg-muted text-muted-foreground">{list.currency}</span>
+        <span className="px-1.5 py-0.5 rounded text-[10px] bg-muted text-muted-foreground">{list.mealPlan}</span>
+        {list.priority > 0 && <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-700">P{list.priority}</span>}
+        <span className="text-[10px] text-muted-foreground ml-auto">{validity}</span>
+      </div>
+      {(list.seasons || []).length > 0 && (
+        <div className="px-3 py-2 overflow-x-auto">
+          <table className="w-full text-xs min-w-[560px]">
             <thead>
               <tr className="text-muted-foreground">
-                <th className="text-left py-1 font-medium">Room Type</th>
                 <th className="text-left py-1 font-medium">Season</th>
-                <th className="text-left py-1 font-medium">Months</th>
-                <th className="text-right py-1 font-medium">Rate/Night</th>
-                <th className="text-left py-1 font-medium">Meal Plan</th>
-                <th className="text-center py-1 font-medium">Max Occ.</th>
+                <th className="text-left py-1 font-medium">Room</th>
+                <th className="text-right py-1 font-medium">Single</th>
+                <th className="text-right py-1 font-medium">PP Sharing</th>
+                <th className="text-right py-1 font-medium">Triple PP</th>
+                <th className="text-right py-1 font-medium">Quad PP</th>
               </tr>
             </thead>
             <tbody>
-              {hotel.rates.map((r, i) => (
-                <tr key={i} className="border-t border-border/60">
-                  <td className="py-1.5 font-medium text-foreground">{r.roomType}</td>
-                  <td className="py-1.5">
-                    <span className={`px-1.5 py-0.5 rounded ${seasonColors[r.season]}`}>
-                      {seasonLabels[r.season]}
-                    </span>
-                  </td>
-                  <td className="py-1.5 text-muted-foreground">{r.startMonth}–{r.endMonth}</td>
-                  <td className="py-1.5 text-right font-semibold text-foreground">{formatCurrency(r.ratePerNight, hotel.currency)}</td>
-                  <td className="py-1.5 text-muted-foreground">{mealPlanLabels[r.mealPlan] || r.mealPlan}</td>
-                  <td className="py-1.5 text-center text-muted-foreground">{r.maxOccupancy}</td>
-                </tr>
+              {list.seasons.map((s, si) => (
+                (s.rooms || []).map((r, ri) => (
+                  <tr key={`${si}-${ri}`} className="border-t border-border/50">
+                    <td className="py-1 text-foreground">{ri === 0 ? s.label : ''}</td>
+                    <td className="py-1 text-muted-foreground">{r.roomType}</td>
+                    <td className="py-1 text-right">{formatCurrency(r.singleOccupancy, list.currency)}</td>
+                    <td className="py-1 text-right font-semibold">{formatCurrency(r.perPersonSharing, list.currency)}</td>
+                    <td className="py-1 text-right">{formatCurrency(r.triplePerPerson, list.currency)}</td>
+                    <td className="py-1 text-right">{formatCurrency(r.quadPerPerson, list.currency)}</td>
+                  </tr>
+                ))
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {(list.passThroughFees?.length > 0 || list.addOns?.length > 0 || list.cancellationTiers?.length > 0) && (
+        <div className="px-3 py-1.5 text-[10px] text-muted-foreground border-t border-border/40 flex gap-3">
+          {list.passThroughFees?.length > 0 && <span>{list.passThroughFees.length} pass-through fee{list.passThroughFees.length === 1 ? '' : 's'}</span>}
+          {list.addOns?.length > 0 && <span>{list.addOns.length} add-on{list.addOns.length === 1 ? '' : 's'}</span>}
+          {list.cancellationTiers?.length > 0 && <span>{list.cancellationTiers.length} cancellation tier{list.cancellationTiers.length === 1 ? '' : 's'}</span>}
         </div>
       )}
     </div>

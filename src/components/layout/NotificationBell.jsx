@@ -95,7 +95,7 @@ export default function NotificationBell({ variant = 'sidebar' }) {
   const isTopbar = variant === 'topbar';
   const buttonCls = isTopbar
     ? 'relative p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-    : 'relative p-1.5 rounded-md text-white/50 hover:text-white hover:bg-card/10 transition-colors';
+    : 'relative p-1.5 rounded-md text-sand-500 hover:text-slate-brand hover:bg-sand-100 transition-colors';
   const bellSize = isTopbar ? 'w-5 h-5' : 'w-4 h-4';
   const dropdownPosCls = isTopbar
     ? 'fixed right-3 top-14 w-[calc(100vw-1.5rem)] max-w-sm'

@@ -59,17 +59,17 @@ export default function AppLayout() {
   })();
 
   return (
-    <div className="min-h-screen flex bg-sand-50">
+    <div className="min-h-screen flex bg-white">
       {/* Sidebar — desktop only */}
       <aside
         className={`
           hidden lg:flex sticky top-0 left-0 z-50 h-screen flex-col
-          bg-slate-brand text-white transition-all duration-300 ease-in-out
+          bg-sand-50 text-slate-brand border-r border-sand-200 transition-all duration-300 ease-in-out
           ${collapsed ? 'w-[72px]' : 'w-64'}
         `}
       >
         {/* Logo */}
-        <div className={`flex items-center h-16 px-4 border-b border-white/10 ${collapsed ? 'justify-center' : 'gap-3'}`}>
+        <div className={`flex items-center h-16 px-4 border-b border-sand-200 ${collapsed ? 'justify-center' : 'gap-3'}`}>
           {organization?.branding?.logo ? (
             <img
               src={organization.branding.logo}
@@ -101,8 +101,8 @@ export default function AppLayout() {
                 flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
                 transition-all duration-150
                 ${isActive
-                  ? 'bg-white/15 text-white'
-                  : 'text-white/60 hover:text-white hover:bg-white/8'
+                  ? 'bg-amber-brand/10 text-amber-brand'
+                  : 'text-sand-600 hover:text-slate-brand hover:bg-sand-100'
                 }
                 ${collapsed ? 'justify-center' : ''}
               `}
@@ -114,24 +114,24 @@ export default function AppLayout() {
         </nav>
 
         {/* User section */}
-        <div className={`p-3 border-t border-white/10 ${collapsed ? 'px-2' : ''}`}>
+        <div className={`p-3 border-t border-sand-200 ${collapsed ? 'px-2' : ''}`}>
           <div className={`mb-2 ${collapsed ? 'flex justify-center' : ''}`}>
             <NotificationBell />
           </div>
           <div className={`flex items-center gap-3 ${collapsed ? 'justify-center' : ''}`}>
-            <div className="w-8 h-8 rounded-full bg-amber-brand/80 flex items-center justify-center text-xs font-semibold flex-shrink-0">
+            <div className="w-8 h-8 rounded-full bg-amber-brand/80 flex items-center justify-center text-xs font-semibold text-white flex-shrink-0">
               {getInitials(user?.name)}
             </div>
             {!collapsed && (
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{user?.name}</p>
-                <p className="text-xs text-white/40 truncate">{user?.role}</p>
+                <p className="text-sm font-medium text-slate-brand truncate">{user?.name}</p>
+                <p className="text-xs text-sand-500 truncate">{user?.role}</p>
               </div>
             )}
             {!collapsed && (
               <button
                 onClick={logout}
-                className="p-1.5 rounded-md text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+                className="p-1.5 rounded-md text-sand-500 hover:text-slate-brand hover:bg-sand-100 transition-colors"
                 title="Log out"
               >
                 <LogOut className="w-4 h-4" />
@@ -143,7 +143,7 @@ export default function AppLayout() {
         {/* Collapse toggle */}
         <button
           onClick={() => setCollapsed(!collapsed)}
-          className="hidden lg:flex absolute -right-3 top-20 w-6 h-6 rounded-full bg-slate-brand border-2 border-sand-100 items-center justify-center text-white/60 hover:text-white transition-colors"
+          className="hidden lg:flex absolute -right-3 top-20 w-6 h-6 rounded-full bg-white border border-sand-200 shadow-sm items-center justify-center text-sand-500 hover:text-slate-brand transition-colors"
         >
           <ChevronRight className={`w-3.5 h-3.5 transition-transform ${collapsed ? '' : 'rotate-180'}`} />
         </button>
