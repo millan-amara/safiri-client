@@ -118,7 +118,7 @@ export default function AppLayout() {
           <div className={`mb-2 ${collapsed ? 'flex justify-center' : ''}`}>
             <NotificationBell />
           </div>
-          <div className={`flex items-center gap-3 ${collapsed ? 'justify-center' : ''}`}>
+          <div className={`flex ${collapsed ? 'flex-col items-center gap-2' : 'items-center gap-3'}`}>
             <div className="w-8 h-8 rounded-full bg-amber-brand/80 flex items-center justify-center text-xs font-semibold text-white flex-shrink-0">
               {getInitials(user?.name)}
             </div>
@@ -128,15 +128,13 @@ export default function AppLayout() {
                 <p className="text-xs text-sand-500 truncate">{user?.role}</p>
               </div>
             )}
-            {!collapsed && (
-              <button
-                onClick={logout}
-                className="p-1.5 rounded-md text-sand-500 hover:text-slate-brand hover:bg-sand-100 transition-colors"
-                title="Log out"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
-            )}
+            <button
+              onClick={logout}
+              className="p-1.5 rounded-md text-sand-500 hover:text-slate-brand hover:bg-sand-100 transition-colors"
+              title="Log out"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
         </div>
 

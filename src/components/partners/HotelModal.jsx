@@ -150,7 +150,7 @@ export default function HotelModal({ hotel, onClose, onSaved }) {
   };
 
   return (
-    <Modal title={isEdit ? 'Edit Hotel' : 'Add Hotel'} onClose={onClose} xwide>
+    <Modal title={isEdit ? 'Edit Hotel' : 'Add Hotel'} onClose={onClose} xwide persistent>
       <form onSubmit={handleSubmit} className="space-y-4">
         {extractWarnings.length > 0 && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">

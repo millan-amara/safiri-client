@@ -49,6 +49,8 @@ export default function DashboardPage() {
       sub: `${stats?.activeDeals || 0} active deals`,
       icon: TrendingUp,
       link: '/crm',
+      iconBg: 'bg-emerald-50',
+      iconColor: 'text-emerald-600',
     },
     {
       label: 'Contacts',
@@ -56,6 +58,8 @@ export default function DashboardPage() {
       sub: `${stats?.newContacts || 0} new this month`,
       icon: Users,
       link: '/crm',
+      iconBg: 'bg-blue-50',
+      iconColor: 'text-blue-600',
     },
     {
       label: 'Quotes',
@@ -63,6 +67,8 @@ export default function DashboardPage() {
       sub: `${stats?.viewedQuotes || 0} client views`,
       icon: FileText,
       link: '/quotes',
+      iconBg: 'bg-violet-50',
+      iconColor: 'text-violet-600',
     },
     {
       label: 'Win rate',
@@ -70,6 +76,8 @@ export default function DashboardPage() {
       sub: `${stats?.dealsWon || 0} won / ${stats?.dealsLost || 0} lost`,
       icon: Target,
       link: '/crm',
+      iconBg: 'bg-amber-50',
+      iconColor: 'text-amber-600',
     },
   ];
 
@@ -93,15 +101,15 @@ export default function DashboardPage() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {statCards.map(({ label, value, sub, icon: Icon, link }) => (
+        {statCards.map(({ label, value, sub, icon: Icon, link, iconBg, iconColor }) => (
           <Link
             key={label}
             to={link}
             className="group bg-card border border-border rounded-xl p-4 sm:p-5 hover:border-primary/40 hover:shadow-sm transition-all duration-200"
           >
             <div className="flex items-start justify-between mb-3 sm:mb-4">
-              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-muted flex items-center justify-center">
-                <Icon className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground" strokeWidth={1.5} />
+              <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-lg ${iconBg} flex items-center justify-center`}>
+                <Icon className={`w-4 h-4 sm:w-5 sm:h-5 ${iconColor}`} strokeWidth={1.75} />
               </div>
               <ArrowUpRight className="w-4 h-4 text-muted-foreground/50 group-hover:text-primary group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" />
             </div>
@@ -494,14 +502,14 @@ export default function DashboardPage() {
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
             {[
-              { label: 'Hotels', value: partnerStats.hotels || 0, icon: Building2 },
-              { label: 'Transport', value: partnerStats.transport || 0, icon: Briefcase },
-              { label: 'Activities', value: partnerStats.activities || 0, icon: Star },
-              { label: 'Destinations', value: partnerStats.destinations || 0, icon: Layers },
-            ].map(({ label, value, icon: Icon }) => (
+              { label: 'Hotels', value: partnerStats.hotels || 0, icon: Building2, iconBg: 'bg-blue-50', iconColor: 'text-blue-600' },
+              { label: 'Transport', value: partnerStats.transport || 0, icon: Briefcase, iconBg: 'bg-violet-50', iconColor: 'text-violet-600' },
+              { label: 'Activities', value: partnerStats.activities || 0, icon: Star, iconBg: 'bg-amber-50', iconColor: 'text-amber-600' },
+              { label: 'Destinations', value: partnerStats.destinations || 0, icon: Layers, iconBg: 'bg-emerald-50', iconColor: 'text-emerald-600' },
+            ].map(({ label, value, icon: Icon, iconBg, iconColor }) => (
               <div key={label} className="flex items-center gap-3 p-3 sm:p-4 rounded-lg bg-muted/40">
-                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-card border border-border flex items-center justify-center shrink-0">
-                  <Icon className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground" strokeWidth={1.5} />
+                <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-lg ${iconBg} flex items-center justify-center shrink-0`}>
+                  <Icon className={`w-4 h-4 sm:w-5 sm:h-5 ${iconColor}`} strokeWidth={1.75} />
                 </div>
                 <div className="min-w-0">
                   <p className="text-lg sm:text-xl font-semibold text-foreground tabular-nums leading-none">{value}</p>

@@ -120,7 +120,7 @@ export default function DealModal({ deal, pipelines, contacts, team, onClose, on
   const labelCls = 'block text-xs font-medium text-muted-foreground mb-1';
 
   return (
-    <Modal title={isEdit ? 'Edit Deal' : 'New Deal'} onClose={onClose} wide>
+    <Modal title={isEdit ? 'Edit Deal' : 'New Deal'} onClose={onClose} wide persistent>
       <form onSubmit={handleSubmit} className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
         {/* Title + Assignment */}
         <div>

@@ -148,7 +148,7 @@ export default function PackageModal({ item, onClose, onSaved }) {
   };
 
   return (
-    <Modal title={isEdit ? 'Edit Package' : 'Add Package'} onClose={onClose} xwide>
+    <Modal title={isEdit ? 'Edit Package' : 'Add Package'} onClose={onClose} xwide persistent>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>

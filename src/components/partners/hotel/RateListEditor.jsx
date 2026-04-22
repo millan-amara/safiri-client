@@ -641,14 +641,14 @@ const ADD_ON_UNITS = ['per_person_per_day', 'per_day', 'per_trip', 'per_person',
 function AddOnsTab({ addOns, currency, onChange }) {
   const add = () => onChange([
     ...addOns,
-    { name: '', description: '', unit: 'per_person_per_day', amount: 0, optional: true },
+    { name: '', description: '', unit: 'per_person_per_day', amount: 0, currency: currency, optional: true },
   ]);
   const remove = (i) => onChange(addOns.filter((_, idx) => idx !== i));
   const update = (i, patch) => onChange(addOns.map((a, idx) => idx === i ? { ...a, ...patch } : a));
 
   return (
     <div className="space-y-2">
-      <p className="text-[11px] text-muted-foreground">Drinks packages, vehicle hire, spa, extra meals. Listed on the quote — optional add-ons are opt-in by the guest; mandatory are automatically included.</p>
+      <p className="text-[11px] text-muted-foreground">Drinks packages, vehicle hire, spa, extra meals. Listed on the quote — optional add-ons are opt-in by the guest; mandatory are automatically included. Each can be priced in its own currency.</p>
       {addOns.map((a, i) => (
         <div key={i} className="rounded border border-border/60 bg-background p-2.5 grid grid-cols-1 md:grid-cols-12 gap-2">
           <div className="md:col-span-3">
@@ -659,14 +659,20 @@ function AddOnsTab({ addOns, currency, onChange }) {
             <label className={label}>Description</label>
             <input type="text" value={a.description || ''} onChange={e => update(i, { description: e.target.value })} placeholder="House beer, wine, spirits" className={input} />
           </div>
-          <div className="md:col-span-3">
+          <div className="md:col-span-2">
             <label className={label}>Unit</label>
             <select value={a.unit} onChange={e => update(i, { unit: e.target.value })} className={input}>
               {ADD_ON_UNITS.map(u => <option key={u} value={u}>{u.replace(/_/g, ' ')}</option>)}
             </select>
           </div>
           <div className="md:col-span-1">
-            <label className={label}>{currency}</label>
+            <label className={label}>Currency</label>
+            <select value={a.currency || currency} onChange={e => update(i, { currency: e.target.value })} className={input} title="Defaults to rate list currency; override for USD add-ons on a KES list etc.">
+              {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="md:col-span-1">
+            <label className={label}>Amount</label>
             <input type="number" value={a.amount} onChange={e => update(i, { amount: parseFloat(e.target.value) || 0 })} className={input} />
           </div>
           <div className="md:col-span-1">

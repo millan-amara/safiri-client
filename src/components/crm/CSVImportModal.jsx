@@ -104,7 +104,7 @@ export default function CSVImportModal({ onClose, onImported }) {
   };
 
   return (
-    <Modal title="Import Contacts from CSV" onClose={onClose} wide>
+    <Modal title="Import Contacts from CSV" onClose={onClose} wide persistent>
       {/* Step: Upload */}
       {step === 'upload' && (
         <div className="text-center py-8">
