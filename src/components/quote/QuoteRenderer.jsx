@@ -517,6 +517,18 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                               <img src={day.hotel.images[0].url} alt={day.hotel.name} className="w-full h-28 object-cover block" />
                             </div>
                           )}
+                          {(day.hotel.inclusions?.length > 0) && (
+                            <div className="mt-3 pt-3 border-t border-stone-100">
+                              <p className="text-[10px] uppercase tracking-wider text-stone-400 font-semibold mb-1.5">Included at this stay</p>
+                              <ul className="space-y-0.5">
+                                {day.hotel.inclusions.map((item, i) => (
+                                  <li key={i} className="text-[11px] text-stone-600 leading-snug flex gap-1.5">
+                                    <span className="text-green-600">✓</span><span>{item}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
                         </div>
                       )}
 

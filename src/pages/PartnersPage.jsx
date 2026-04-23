@@ -404,6 +404,14 @@ import HotelModal from '../components/partners/HotelModal';
 import TransportModal from '../components/partners/TransportModal';
 import ActivityModal from '../components/partners/ActivityModal';
 import PackageModal from '../components/partners/PackageModal';
+import ConfirmDialog from '../components/shared/ConfirmDialog';
+
+const DELETE_LABELS = {
+  hotels: 'hotel',
+  transport: 'transport provider',
+  activities: 'activity',
+  packages: 'package',
+};
 import {
   Hotel, Truck, Ticket, Upload, Plus, Search, Edit2, Trash2,
   X, ChevronDown, Star, MapPin, DollarSign, Filter, Lock, Map, Download,
@@ -425,6 +433,7 @@ export default function PartnersPage() {
   const [importing, setImporting] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editItem, setEditItem] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const fileRef = useRef();
 
   const fetchData = async () => {
@@ -476,11 +485,16 @@ export default function PartnersPage() {
     }
   };
 
-  const handleDelete = async (type, id) => {
-    if (!confirm('Are you sure?')) return;
+  const handleDelete = (type, id, name) => {
+    setDeleteTarget({ type, id, name });
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
     try {
-      await api.delete(`/partners/${type}/${id}`);
+      await api.delete(`/partners/${deleteTarget.type}/${deleteTarget.id}`);
       toast.success('Deleted');
+      setDeleteTarget(null);
       fetchData();
     } catch {
       toast.error('Delete failed');
@@ -671,7 +685,7 @@ export default function PartnersPage() {
                       <button onClick={() => { setEditItem(t); setShowAddModal(true); }} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground/70 hover:text-foreground transition-colors">
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
-                      <button onClick={() => handleDelete('transport', t._id)} className="p-1.5 rounded-md hover:bg-red-50 text-muted-foreground/70 hover:text-red-500 transition-colors">
+                      <button onClick={() => handleDelete('transport', t._id, t.name)} className="p-1.5 rounded-md hover:bg-red-50 text-muted-foreground/70 hover:text-red-500 transition-colors">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -712,7 +726,7 @@ export default function PartnersPage() {
                       <button onClick={() => { setEditItem(a); setShowAddModal(true); }} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground/70 hover:text-foreground transition-colors">
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
-                      <button onClick={() => handleDelete('activities', a._id)} className="p-1.5 rounded-md hover:bg-red-50 text-muted-foreground/70 hover:text-red-500 transition-colors">
+                      <button onClick={() => handleDelete('activities', a._id, a.name)} className="p-1.5 rounded-md hover:bg-red-50 text-muted-foreground/70 hover:text-red-500 transition-colors">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -758,7 +772,7 @@ export default function PartnersPage() {
                         <button onClick={() => { setEditItem(p); setShowAddModal(true); }} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground/70 hover:text-foreground transition-colors">
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => handleDelete('packages', p._id)} className="p-1.5 rounded-md hover:bg-red-50 text-muted-foreground/70 hover:text-red-500 transition-colors">
+                        <button onClick={() => handleDelete('packages', p._id, p.name)} className="p-1.5 rounded-md hover:bg-red-50 text-muted-foreground/70 hover:text-red-500 transition-colors">
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
@@ -783,6 +797,20 @@ export default function PartnersPage() {
       )}
       {showAddModal && tab === 'packages' && (
         <PackageModal item={editItem} onClose={() => { setShowAddModal(false); setEditItem(null); }} onSaved={fetchData} />
+      )}
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title={`Delete this ${DELETE_LABELS[deleteTarget.type] || 'item'}?`}
+          message={
+            deleteTarget.name
+              ? `"${deleteTarget.name}" will be permanently removed. This cannot be undone.`
+              : 'This will be permanently removed. This cannot be undone.'
+          }
+          confirmLabel="Delete"
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
       )}
     </div>
   );
@@ -819,7 +847,7 @@ function HotelCard({ hotel, onDelete, onEdit }) {
             <button onClick={(e) => { e.stopPropagation(); onEdit(hotel); }} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground/70 hover:text-foreground transition-colors">
               <Edit2 className="w-3.5 h-3.5" />
             </button>
-            <button onClick={(e) => { e.stopPropagation(); onDelete('hotels', hotel._id); }} className="p-1.5 rounded-md hover:bg-red-50 text-muted-foreground/70 hover:text-red-500 transition-colors">
+            <button onClick={(e) => { e.stopPropagation(); onDelete('hotels', hotel._id, hotel.name); }} className="p-1.5 rounded-md hover:bg-red-50 text-muted-foreground/70 hover:text-red-500 transition-colors">
               <Trash2 className="w-3.5 h-3.5" />
             </button>
           </div>

@@ -324,6 +324,8 @@ export default function QuoteBuilderPage() {
             addOns: data.addOns,
             cancellationTiers: data.cancellationTiers,
             depositPct: data.depositPct,
+            inclusions: data.inclusions || [],
+            exclusions: data.exclusions || [],
             warnings: data.warnings,
           },
           roomType: data.roomType || '',
@@ -934,6 +936,25 @@ export default function QuoteBuilderPage() {
             items={quote.inclusions || []}
             onChange={(items) => setQuote({ ...quote, inclusions: items })}
             color="green"
+            extraAction={
+              quote.days?.some(d => (d.hotel?.inclusions || []).length > 0) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const merged = new Set(quote.inclusions || []);
+                    for (const d of quote.days || []) {
+                      for (const item of (d.hotel?.inclusions || [])) merged.add(item);
+                    }
+                    setQuote({ ...quote, inclusions: Array.from(merged) });
+                    toast.success('Merged hotel inclusions into trip inclusions');
+                  }}
+                  className="text-[11px] text-primary hover:underline"
+                  title="Pull inclusions from every hotel in the itinerary into one flat list"
+                >
+                  Merge from hotels
+                </button>
+              )
+            }
           />
           <ListEditor
             title="Excluded"
@@ -941,6 +962,25 @@ export default function QuoteBuilderPage() {
             items={quote.exclusions || []}
             onChange={(items) => setQuote({ ...quote, exclusions: items })}
             color="sand"
+            extraAction={
+              quote.days?.some(d => (d.hotel?.exclusions || []).length > 0) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const merged = new Set(quote.exclusions || []);
+                    for (const d of quote.days || []) {
+                      for (const item of (d.hotel?.exclusions || [])) merged.add(item);
+                    }
+                    setQuote({ ...quote, exclusions: Array.from(merged) });
+                    toast.success('Merged hotel exclusions into trip exclusions');
+                  }}
+                  className="text-[11px] text-primary hover:underline"
+                  title="Pull exclusions from every hotel in the itinerary into one flat list"
+                >
+                  Merge from hotels
+                </button>
+              )
+            }
           />
 
           {/* Block Toggles — what to show on the share page */}
@@ -1284,7 +1324,7 @@ function AIPanel({ quote, setQuote, destinations }) {
     </div>
   );
 }
-function ListEditor({ title, icon, items, onChange, color }) {
+function ListEditor({ title, icon, items, onChange, color, extraAction }) {
   const [newItem, setNewItem] = useState('');
 
   const addItem = () => {
@@ -1302,7 +1342,10 @@ function ListEditor({ title, icon, items, onChange, color }) {
 
   return (
     <div className={`bg-card rounded-xl border ${borderColor} p-4 sm:p-5`}>
-      <h3 className="text-sm font-semibold text-foreground mb-3">{icon} {title}</h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-foreground">{icon} {title}</h3>
+        {extraAction}
+      </div>
       <div className="space-y-1.5 mb-3">
         {items.map((item, i) => (
           <div key={i} className="flex items-center justify-between group">

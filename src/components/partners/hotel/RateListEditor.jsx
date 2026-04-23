@@ -32,6 +32,7 @@ function emptyRoomPricing() {
   return {
     roomType: 'Standard',
     maxOccupancy: 2,
+    pricingMode: 'per_person',
     singleOccupancy: 0,
     perPersonSharing: 0,
     triplePerPerson: 0,
@@ -200,7 +201,7 @@ export default function RateListEditor({ list, index, onChange, onRemove, onDupl
               { id: 'pricing', label: `Seasons & Rooms (${list.seasons?.length || 0})` },
               { id: 'addons', label: `Add-ons (${list.addOns?.length || 0})` },
               { id: 'fees', label: `Pass-through Fees (${list.passThroughFees?.length || 0})` },
-              { id: 'terms', label: 'Cancellation & Terms' },
+              { id: 'terms', label: `Inclusions & Terms${(list.inclusions?.length || list.exclusions?.length) ? ` (${(list.inclusions?.length || 0) + (list.exclusions?.length || 0)})` : ''}` },
             ].map(t => (
               <button
                 key={t.id}
@@ -438,6 +439,10 @@ function SeasonEditor({ season, currency, onChange, onRemove, onDuplicate }) {
 
 function RoomPricingEditor({ room, currency, onChange, onRemove, canRemove }) {
   const [childOpen, setChildOpen] = useState((room.childBrackets || []).length > 0);
+  const isPerRoom = room.pricingMode === 'per_room_total';
+  const sharingLabel = isPerRoom ? 'Double Total' : 'PP Sharing';
+  const tripleLabel = isPerRoom ? 'Triple Total' : 'Triple PP';
+  const quadLabel = isPerRoom ? 'Quad Total' : 'Quad PP';
 
   const updateChild = (idx, patch) => onChange({
     childBrackets: (room.childBrackets || []).map((b, i) => i === idx ? { ...b, ...patch } : b),
@@ -454,6 +459,29 @@ function RoomPricingEditor({ room, currency, onChange, onRemove, canRemove }) {
 
   return (
     <div className="rounded-md border border-border/60 bg-background p-2.5 space-y-2">
+      {/* Pricing mode toggle — drives how Double/Triple/Quad values are interpreted */}
+      <div className="flex items-center justify-between gap-2 pb-2 border-b border-border/40">
+        <div className="text-[11px] text-muted-foreground">
+          Pricing mode:{' '}
+          <button
+            type="button"
+            onClick={() => onChange({ pricingMode: 'per_person' })}
+            className={`px-2 py-0.5 rounded text-[10px] font-medium ${!isPerRoom ? 'bg-primary text-white' : 'bg-muted text-muted-foreground hover:bg-muted/70'}`}
+          >
+            Per Person
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange({ pricingMode: 'per_room_total' })}
+            className={`ml-1 px-2 py-0.5 rounded text-[10px] font-medium ${isPerRoom ? 'bg-primary text-white' : 'bg-muted text-muted-foreground hover:bg-muted/70'}`}
+          >
+            Per Room Total
+          </button>
+        </div>
+        <span className="text-[10px] text-muted-foreground/70">
+          {isPerRoom ? 'Double/Triple/Quad values are whole-room nightly totals' : 'Double/Triple/Quad values are one person\'s share'}
+        </span>
+      </div>
       <div className="grid grid-cols-2 sm:grid-cols-7 gap-2">
         <div className="sm:col-span-2">
           <label className={label}>Room Type</label>
@@ -468,15 +496,15 @@ function RoomPricingEditor({ room, currency, onChange, onRemove, canRemove }) {
           <input type="number" value={room.singleOccupancy} onChange={e => onChange({ singleOccupancy: parseFloat(e.target.value) || 0 })} className={input} />
         </div>
         <div>
-          <label className={label}>PP Sharing</label>
+          <label className={label}>{sharingLabel}</label>
           <input type="number" value={room.perPersonSharing} onChange={e => onChange({ perPersonSharing: parseFloat(e.target.value) || 0 })} className={input} />
         </div>
         <div>
-          <label className={label}>Triple PP</label>
+          <label className={label}>{tripleLabel}</label>
           <input type="number" value={room.triplePerPerson} onChange={e => onChange({ triplePerPerson: parseFloat(e.target.value) || 0 })} className={input} />
         </div>
         <div>
-          <label className={label}>Quad PP</label>
+          <label className={label}>{quadLabel}</label>
           <input type="number" value={room.quadPerPerson} onChange={e => onChange({ quadPerPerson: parseFloat(e.target.value) || 0 })} className={input} />
         </div>
       </div>
@@ -843,6 +871,36 @@ function TermsTab({ list, update }) {
 
   return (
     <div className="space-y-3">
+      {/* Inclusions / Exclusions — shown per-hotel on the client's quote */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <label className={label}>Inclusions — what's bundled into the rate (one per line)</label>
+          <textarea
+            rows={6}
+            value={(list.inclusions || []).join('\n')}
+            onChange={e => update({ inclusions: e.target.value.split('\n') })}
+            className={`${input} resize-none`}
+            placeholder={'Full-board – all meals & accommodation\nSoft drinks, local beers, house wines\nShared game drives\nBush breakfast, sundowner\nVAT & taxes'}
+          />
+          <p className="text-[10px] text-muted-foreground/70 mt-1">
+            Press Enter for a new line. Shown to the client on the quote under each hotel stay.
+          </p>
+        </div>
+        <div>
+          <label className={label}>Exclusions — what the rate does NOT cover (one per line)</label>
+          <textarea
+            rows={6}
+            value={(list.exclusions || []).join('\n')}
+            onChange={e => update({ exclusions: e.target.value.split('\n') })}
+            className={`${input} resize-none`}
+            placeholder={'Daily conservation fees\nPremium spirits, wines, Champagne\nMassages & treatments\nExtra lunch on departure day\nGratuities'}
+          />
+          <p className="text-[10px] text-muted-foreground/70 mt-1">
+            Press Enter for a new line.
+          </p>
+        </div>
+      </div>
+
       <div>
         <div className="flex items-center justify-between mb-1.5">
           <span className={label}>Cancellation Tiers ({(list.cancellationTiers || []).length})</span>

@@ -2,6 +2,7 @@ import { useState, useRef } from 'react';
 import Modal from '../shared/Modal';
 import ImageGallery from '../shared/ImageGallery';
 import RateListEditor, { emptyList } from './hotel/RateListEditor';
+import { useAuth } from '../../context/AuthContext';
 import api from '../../utils/api';
 import toast from 'react-hot-toast';
 import { Plus, UploadCloud, Loader2, AlertTriangle, X } from 'lucide-react';
@@ -14,11 +15,16 @@ const labelCls = 'block text-xs font-medium text-muted-foreground mb-1';
 
 export default function HotelModal({ hotel, onClose, onSaved }) {
   const isEdit = !!hotel?._id;
+  const { refreshOrganization } = useAuth();
   const [tab, setTab] = useState('basics'); // basics | rates | images
   const [saving, setSaving] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [images, setImages] = useState(hotel?.images || []);
   const [extractWarnings, setExtractWarnings] = useState([]);
+  // Extra hotels returned from a multi-hotel PDF that the user hasn't yet
+  // loaded into this form or saved as separate records.
+  const [pendingOtherHotels, setPendingOtherHotels] = useState([]);
+  const [batchSaving, setBatchSaving] = useState(false);
   const pdfInputRef = useRef(null);
 
   const [form, setForm] = useState({
@@ -58,6 +64,66 @@ export default function HotelModal({ hotel, onClose, onSaved }) {
   // current form: basics overwrite only if currently empty (so we don't
   // clobber something the operator just typed), and rate lists are APPENDED
   // to whatever they already have. They can then prune/edit in the tabs.
+  // Reshape a raw extracted hotel into form-friendly values (ISO dates → YYYY-MM-DD).
+  const shapeExtractedHotel = (d) => ({
+    ...d,
+    rateLists: (d.rateLists || []).map(list => ({
+      ...emptyList(),
+      ...list,
+      validFrom: list.validFrom ? String(list.validFrom).slice(0, 10) : '',
+      validTo: list.validTo ? String(list.validTo).slice(0, 10) : '',
+      seasons: (list.seasons || []).map(s => ({
+        ...s,
+        dateRanges: (s.dateRanges || []).map(r => ({
+          from: r.from ? String(r.from).slice(0, 10) : '',
+          to: r.to ? String(r.to).slice(0, 10) : '',
+        })),
+        specificDates: (s.specificDates || []).map(x => x ? String(x).slice(0, 10) : '').filter(Boolean),
+        rooms: s.rooms || [],
+        supplements: (s.supplements || []).map(sup => ({
+          ...sup,
+          dates: (sup.dates || []).map(dr => ({
+            from: dr.from ? String(dr.from).slice(0, 10) : '',
+            to: dr.to ? String(dr.to).slice(0, 10) : '',
+          })),
+        })),
+      })),
+    })),
+  });
+
+  // Load ONE extracted hotel into the current form. Basics fill only if the
+  // corresponding form field is blank — never clobber operator-typed data.
+  // Amenities and tags union with whatever's already there (deduped). Rate
+  // lists always append. If the PDF was an info-only sheet (no rate lists),
+  // the form lands on the Basics tab instead of jumping to Rates.
+  const loadExtractedIntoForm = (d) => {
+    const hasRates = (d.rateLists || []).length > 0;
+    const prevAmenities = form.amenities ? form.amenities.split(',').map(s => s.trim()).filter(Boolean) : [];
+    const newAmenities = Array.isArray(d.amenities) ? d.amenities : (d.amenities ? String(d.amenities).split(',').map(s => s.trim()) : []);
+    const mergedAmenities = Array.from(new Set([...prevAmenities, ...newAmenities])).join(', ');
+
+    const prevTags = form.tags ? form.tags.split(',').map(s => s.trim()).filter(Boolean) : [];
+    const newTags = Array.isArray(d.tags) ? d.tags : (d.tags ? String(d.tags).split(',').map(s => s.trim()) : []);
+    const mergedTags = Array.from(new Set([...prevTags, ...newTags])).join(', ');
+
+    setForm(prev => ({
+      ...prev,
+      name: prev.name || d.name || '',
+      destination: prev.destination || d.destination || '',
+      location: prev.location || d.location || '',
+      stars: prev.stars || d.stars || 3,
+      type: prev.type || d.type || 'hotel',
+      description: prev.description || d.description || '',
+      currency: prev.currency || d.currency || 'USD',
+      contactEmail: prev.contactEmail || d.contactEmail || '',
+      contactPhone: prev.contactPhone || d.contactPhone || '',
+      amenities: mergedAmenities,
+      tags: mergedTags,
+      rateLists: [...(prev.rateLists || []), ...(d.rateLists || [])],
+    }));
+    setTab(hasRates ? 'rates' : 'basics');
+  };
+
   const handlePdfPick = () => pdfInputRef.current?.click();
   const handlePdfUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -72,51 +138,114 @@ export default function HotelModal({ hotel, onClose, onSaved }) {
       const { data } = await api.post('/partners/hotels/extract-pdf', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      const d = data.draft || {};
-      setForm(prev => ({
-        ...prev,
-        name: prev.name || d.name || '',
-        destination: prev.destination || d.destination || '',
-        location: prev.location || d.location || '',
-        stars: prev.stars || d.stars || 3,
-        type: prev.type || d.type || 'hotel',
-        description: prev.description || d.description || '',
-        currency: prev.currency || d.currency || 'USD',
-        rateLists: [...(prev.rateLists || []), ...((d.rateLists || []).map(list => ({
-          ...emptyList(),
-          ...list,
-          // normalize dates to YYYY-MM-DD for <input type=date>
-          validFrom: list.validFrom ? String(list.validFrom).slice(0, 10) : '',
-          validTo: list.validTo ? String(list.validTo).slice(0, 10) : '',
-          seasons: (list.seasons || []).map(s => ({
-            ...s,
-            dateRanges: (s.dateRanges || []).map(r => ({
-              from: r.from ? String(r.from).slice(0, 10) : '',
-              to: r.to ? String(r.to).slice(0, 10) : '',
-            })),
-            specificDates: (s.specificDates || []).map(d => d ? String(d).slice(0, 10) : '').filter(Boolean),
-            rooms: s.rooms || [],
-            supplements: (s.supplements || []).map(sup => ({
-              ...sup,
-              dates: (sup.dates || []).map(dr => ({
-                from: dr.from ? String(dr.from).slice(0, 10) : '',
-                to: dr.to ? String(dr.to).slice(0, 10) : '',
-              })),
-            })),
-          })),
-        })))],
-      }));
-      setTab('rates');
-      setExtractWarnings(d.warnings || []);
-      if (d.warnings?.length) {
-        toast(`Extracted with ${d.warnings.length} warning(s) — see banner above the form`, { icon: '⚠️', duration: 6000 });
-      } else {
-        toast.success(`Extracted ${(d.rateLists || []).length} rate list(s). Review and save.`);
+      const drafts = (data.drafts || []).map(shapeExtractedHotel);
+      const warnings = data.warnings || [];
+      setExtractWarnings(warnings);
+
+      if (drafts.length === 0) {
+        toast.error('No hotels found in the PDF.');
+        return;
       }
+
+      if (drafts.length === 1) {
+        const d = drafts[0];
+        loadExtractedIntoForm(d);
+        if (warnings.length) {
+          toast(`Extracted with ${warnings.length} warning(s) — see banner above the form`, { icon: '⚠️', duration: 6000 });
+        } else {
+          const rateCount = (d.rateLists || []).length;
+          if (rateCount > 0) {
+            toast.success(`Extracted ${rateCount} rate list(s). Review and save.`);
+          } else {
+            // Info/T&C-only document — describe what we actually pulled in.
+            const bits = [];
+            if (d.description) bits.push('description');
+            if ((d.amenities || []).length) bits.push(`${(d.amenities || []).length} amenities`);
+            toast.success(bits.length ? `Extracted ${bits.join(' + ')} into Basics tab.` : 'No rate or property data found in this PDF.');
+          }
+        }
+        return;
+      }
+
+      // Multiple hotels: load the first one into the current form, keep the
+      // rest as "pending" so the operator can choose what to do with them.
+      loadExtractedIntoForm(drafts[0]);
+      setPendingOtherHotels(drafts.slice(1));
+      toast(`Found ${drafts.length} hotels — "${drafts[0].name}" loaded here. See banner for the other ${drafts.length - 1}.`, { icon: '📑', duration: 7000 });
     } catch (err) {
       toast.error(err.response?.data?.message || 'PDF extraction failed');
     } finally {
       setExtracting(false);
+      // AI credits are auto-refunded server-side on any non-2xx response
+      // (see middleware/subscription.js). Refresh the cached org so the UI
+      // balance reflects either the spend (on success) or the refund (on failure).
+      refreshOrganization();
+    }
+  };
+
+  // Swap the currently-loaded hotel with a pending one. The current form's
+  // data goes back into the pending list so nothing is lost if the operator
+  // clicks through several options.
+  const swapToPending = (idx) => {
+    const picked = pendingOtherHotels[idx];
+    const currentSnapshot = {
+      name: form.name,
+      destination: form.destination,
+      location: form.location,
+      stars: form.stars,
+      type: form.type,
+      description: form.description,
+      currency: form.currency,
+      rateLists: form.rateLists,
+    };
+    setPendingOtherHotels(prev => [
+      ...prev.slice(0, idx),
+      currentSnapshot,
+      ...prev.slice(idx + 1),
+    ]);
+    setForm(prevForm => ({
+      ...prevForm,
+      name: picked.name || '',
+      destination: picked.destination || '',
+      location: picked.location || '',
+      stars: picked.stars || 3,
+      type: picked.type || 'hotel',
+      description: picked.description || '',
+      currency: picked.currency || 'USD',
+      rateLists: picked.rateLists || [],
+    }));
+    toast.success(`Loaded "${picked.name}" into the form`);
+  };
+
+  const dismissPending = (idx) => {
+    setPendingOtherHotels(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  // POST each remaining pending hotel as a new record and clear the queue.
+  const saveAllPending = async () => {
+    if (!pendingOtherHotels.length) return;
+    setBatchSaving(true);
+    try {
+      for (const d of pendingOtherHotels) {
+        const payload = {
+          name: d.name || 'Untitled Hotel',
+          destination: d.destination || form.destination || '',
+          location: d.location || '',
+          stars: d.stars || 3,
+          type: d.type || 'hotel',
+          description: d.description || '',
+          currency: d.currency || 'USD',
+          rateLists: (d.rateLists || []).map(normalizeList),
+        };
+        await api.post('/partners/hotels', payload);
+      }
+      toast.success(`Saved ${pendingOtherHotels.length} additional hotel(s)`);
+      setPendingOtherHotels([]);
+      onSaved?.();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to save remaining hotels');
+    } finally {
+      setBatchSaving(false);
     }
   };
 
@@ -150,6 +279,61 @@ export default function HotelModal({ hotel, onClose, onSaved }) {
   return (
     <Modal title={isEdit ? 'Edit Hotel' : 'Add Hotel'} onClose={onClose} xwide persistent>
       <form onSubmit={handleSubmit} className="space-y-4">
+        {pendingOtherHotels.length > 0 && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+            <div className="flex items-start gap-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-blue-900">
+                  {pendingOtherHotels.length} more hotel{pendingOtherHotels.length === 1 ? '' : 's'} found in the PDF
+                </p>
+                <p className="text-[11px] text-blue-800/80 mt-0.5">
+                  Click a name to swap it into this form (the current hotel will swap into the list). Or save them all as separate hotels now.
+                </p>
+                <ul className="mt-2 space-y-1">
+                  {pendingOtherHotels.map((h, i) => (
+                    <li key={i} className="flex items-center gap-2 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => swapToPending(i)}
+                        className="flex-1 text-left px-2 py-1 rounded bg-white border border-blue-200 text-blue-900 hover:border-blue-400 transition-colors"
+                      >
+                        <span className="font-medium">{h.name || 'Untitled hotel'}</span>
+                        {h.destination && <span className="text-blue-700/70"> · {h.destination}</span>}
+                        <span className="text-blue-700/60 ml-1">· {(h.rateLists || []).length} rate list{(h.rateLists || []).length === 1 ? '' : 's'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => dismissPending(i)}
+                        className="p-1 rounded text-blue-700/60 hover:text-red-500"
+                        title="Discard this hotel"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-2.5 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={saveAllPending}
+                    disabled={batchSaving}
+                    className="px-3 py-1 rounded bg-blue-600 text-white text-[11px] font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
+                  >
+                    {batchSaving ? 'Saving…' : `Save all ${pendingOtherHotels.length} as new hotels`}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingOtherHotels([])}
+                    className="px-3 py-1 rounded bg-white border border-blue-200 text-blue-700 text-[11px] font-medium hover:border-blue-400 transition-colors"
+                  >
+                    Dismiss all
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {extractWarnings.length > 0 && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
             <div className="flex items-start gap-2">
@@ -373,6 +557,7 @@ function normalizeList(list) {
       dateRanges: (s.dateRanges || []).filter(r => r.from && r.to).map(r => ({ from: toDate(r.from), to: toDate(r.to) })),
       rooms: (s.rooms || []).map(r => ({
         ...r,
+        pricingMode: r.pricingMode === 'per_room_total' ? 'per_room_total' : 'per_person',
         maxOccupancy: Number(r.maxOccupancy) || 2,
         singleOccupancy: Number(r.singleOccupancy) || 0,
         perPersonSharing: Number(r.perPersonSharing) || 0,
@@ -417,5 +602,7 @@ function normalizeList(list) {
       daysBefore: Number(t.daysBefore) || 0,
       penaltyPct: Number(t.penaltyPct) || 0,
     })),
+    inclusions: Array.isArray(list.inclusions) ? list.inclusions.filter(Boolean) : [],
+    exclusions: Array.isArray(list.exclusions) ? list.exclusions.filter(Boolean) : [],
   };
 }
