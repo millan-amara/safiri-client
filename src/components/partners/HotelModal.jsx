@@ -34,7 +34,9 @@ export default function HotelModal({ hotel, onClose, onSaved }) {
     notes: hotel?.notes || '',
     contactEmail: hotel?.contactEmail || '',
     contactPhone: hotel?.contactPhone || '',
-    rateLists: hotel?.rateLists?.length ? hotel.rateLists : [emptyList()],
+    // Start empty — operator either clicks "Add Rate List" for manual entry
+    // or uses PDF import. No auto-seeded placeholder to delete later.
+    rateLists: hotel?.rateLists?.length ? hotel.rateLists : [],
   });
 
   const updateList = (idx, list) => {
@@ -44,10 +46,6 @@ export default function HotelModal({ hotel, onClose, onSaved }) {
   };
   const addList = () => setForm({ ...form, rateLists: [...form.rateLists, emptyList()] });
   const removeList = (idx) => {
-    if (form.rateLists.length <= 1) {
-      toast.error('A hotel must have at least one rate list');
-      return;
-    }
     setForm({ ...form, rateLists: form.rateLists.filter((_, i) => i !== idx) });
   };
   const duplicateList = (idx) => {
@@ -228,18 +226,30 @@ export default function HotelModal({ hotel, onClose, onSaved }) {
                 <Plus className="w-3.5 h-3.5" /> Add Rate List
               </button>
             </div>
-            <div className="space-y-2">
-              {form.rateLists.map((list, i) => (
-                <RateListEditor
-                  key={i}
-                  list={list}
-                  index={i}
-                  onChange={(updated) => updateList(i, updated)}
-                  onRemove={() => removeList(i)}
-                  onDuplicate={() => duplicateList(i)}
-                />
-              ))}
-            </div>
+            {form.rateLists.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border p-8 text-center">
+                <p className="text-sm font-medium text-foreground">No rate lists yet</p>
+                <p className="text-xs text-muted-foreground mt-1 mb-4">
+                  Add one manually, or click "Import rates from PDF" above to extract from a supplier rate card.
+                </p>
+                <button type="button" onClick={addList} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary transition-colors">
+                  <Plus className="w-3.5 h-3.5" /> Add Rate List
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {form.rateLists.map((list, i) => (
+                  <RateListEditor
+                    key={i}
+                    list={list}
+                    index={i}
+                    onChange={(updated) => updateList(i, updated)}
+                    onRemove={() => removeList(i)}
+                    onDuplicate={() => duplicateList(i)}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -379,6 +389,7 @@ function normalizeList(list) {
       supplements: (s.supplements || []).map(sup => ({
         ...sup,
         amountPerPerson: Number(sup.amountPerPerson) || 0,
+        amountPerChild: Number(sup.amountPerChild) || 0,
         amountPerRoom: Number(sup.amountPerRoom) || 0,
         dates: (sup.dates || []).filter(d => d.from && d.to).map(d => ({ from: toDate(d.from), to: toDate(d.to) })),
       })),

@@ -561,7 +561,7 @@ function RoomPricingEditor({ room, currency, onChange, onRemove, canRemove }) {
 function SupplementsEditor({ supplements, currency, onChange }) {
   const add = () => onChange([
     ...supplements,
-    { name: '', dates: [{ from: '', to: '' }], amountPerPerson: 0, amountPerRoom: 0, currency: currency, mandatory: true, notes: '' },
+    { name: '', dates: [{ from: '', to: '' }], amountPerPerson: 0, amountPerChild: 0, amountPerRoom: 0, currency: currency, mandatory: true, notes: '' },
   ]);
   const remove = (i) => onChange(supplements.filter((_, idx) => idx !== i));
   const update = (i, patch) => onChange(supplements.map((s, idx) => idx === i ? { ...s, ...patch } : s));
@@ -586,7 +586,7 @@ function SupplementsEditor({ supplements, currency, onChange }) {
               <input type="text" value={s.name} onChange={e => update(i, { name: e.target.value })} placeholder="Christmas Eve / NYE" className={`${input} flex-1`} />
               <button type="button" onClick={() => remove(i)} className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
               <div>
                 <label className={label}>Currency</label>
                 <select value={s.currency || currency} onChange={e => update(i, { currency: e.target.value })} className={input} title="Supplements can be in a different currency than the rate list (e.g. USD surcharge on a KES rate card)">
@@ -594,8 +594,12 @@ function SupplementsEditor({ supplements, currency, onChange }) {
                 </select>
               </div>
               <div>
-                <label className={label}>Per Person</label>
+                <label className={label}>Per Adult</label>
                 <input type="number" value={s.amountPerPerson} onChange={e => update(i, { amountPerPerson: parseFloat(e.target.value) || 0 })} className={input} />
+              </div>
+              <div>
+                <label className={label}>Per Child</label>
+                <input type="number" value={s.amountPerChild || 0} onChange={e => update(i, { amountPerChild: parseFloat(e.target.value) || 0 })} className={input} title="0 = children exempt. Use adult amount for supplements that apply to everyone equally." />
               </div>
               <div>
                 <label className={label}>Per Room</label>
