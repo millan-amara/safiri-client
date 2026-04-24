@@ -848,6 +848,15 @@ function normalizeList(list) {
           maxAge: Number(b.maxAge) || 17,
           value: Number(b.value) || 0,
         })),
+        stayTiers: (r.stayTiers || []).map(t => ({
+          minNights: Number(t.minNights) || 1,
+          maxNights: t.maxNights === null || t.maxNights === undefined || t.maxNights === '' ? null : Number(t.maxNights),
+          singleOccupancy: Number(t.singleOccupancy) || 0,
+          perPersonSharing: Number(t.perPersonSharing) || 0,
+          triplePerPerson: Number(t.triplePerPerson) || 0,
+          quadPerPerson: Number(t.quadPerPerson) || 0,
+          singleSupplement: Number(t.singleSupplement) || 0,
+        })),
       })),
       supplements: (s.supplements || []).map(sup => ({
         ...sup,

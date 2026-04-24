@@ -39,7 +39,20 @@ function emptyRoomPricing() {
     quadPerPerson: 0,
     singleSupplement: 0,
     childBrackets: [],
+    stayTiers: [],
     notes: '',
+  };
+}
+
+function emptyStayTier() {
+  return {
+    minNights: 1,
+    maxNights: null,
+    singleOccupancy: 0,
+    perPersonSharing: 0,
+    triplePerPerson: 0,
+    quadPerPerson: 0,
+    singleSupplement: 0,
   };
 }
 
@@ -439,6 +452,7 @@ function SeasonEditor({ season, currency, onChange, onRemove, onDuplicate }) {
 
 function RoomPricingEditor({ room, currency, onChange, onRemove, canRemove }) {
   const [childOpen, setChildOpen] = useState((room.childBrackets || []).length > 0);
+  const [tiersOpen, setTiersOpen] = useState((room.stayTiers || []).length > 0);
   const isPerRoom = room.pricingMode === 'per_room_total';
   const sharingLabel = isPerRoom ? 'Double Total' : 'PP Sharing';
   const tripleLabel = isPerRoom ? 'Triple Total' : 'Triple PP';
@@ -447,6 +461,11 @@ function RoomPricingEditor({ room, currency, onChange, onRemove, canRemove }) {
   const updateChild = (idx, patch) => onChange({
     childBrackets: (room.childBrackets || []).map((b, i) => i === idx ? { ...b, ...patch } : b),
   });
+  const updateTier = (idx, patch) => onChange({
+    stayTiers: (room.stayTiers || []).map((t, i) => i === idx ? { ...t, ...patch } : t),
+  });
+  const addTier = () => onChange({ stayTiers: [...(room.stayTiers || []), emptyStayTier()] });
+  const removeTier = (idx) => onChange({ stayTiers: (room.stayTiers || []).filter((_, i) => i !== idx) });
   const addChild = () => onChange({
     childBrackets: [
       ...(room.childBrackets || []),
@@ -577,6 +596,63 @@ function RoomPricingEditor({ room, currency, onChange, onRemove, canRemove }) {
         )}
       </div>
 
+      {/* Length-of-stay tiers (A&K-style "1-3 / 4-6 / 7+ nights" pricing) */}
+      <div className="rounded border border-border/50 bg-muted/20 p-2">
+        <button
+          type="button"
+          onClick={() => setTiersOpen(!tiersOpen)}
+          className="flex items-center justify-between w-full text-[11px] font-medium text-muted-foreground uppercase tracking-wide"
+        >
+          <span>Length-of-stay tiers ({(room.stayTiers || []).length})</span>
+          {tiersOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+        </button>
+        {tiersOpen && (
+          <div className="mt-2 space-y-1.5">
+            <p className="text-[10px] text-muted-foreground/70">
+              Use when the rate card prices the same room by stay length (e.g. 1-3 nights / 4-6 / 7+). Tier values override the room's base prices when the total stay matches. Leave empty for flat per-night pricing.
+            </p>
+            {(room.stayTiers || []).map((t, i) => (
+              <div key={i} className="grid grid-cols-2 sm:grid-cols-8 gap-1.5 items-end">
+                <div>
+                  <label className={label}>Min nights</label>
+                  <input type="number" min={1} value={t.minNights} onChange={e => updateTier(i, { minNights: parseInt(e.target.value) || 1 })} className={input} />
+                </div>
+                <div>
+                  <label className={label}>Max nights</label>
+                  <input type="number" min={1} value={t.maxNights ?? ''} onChange={e => updateTier(i, { maxNights: e.target.value === '' ? null : parseInt(e.target.value) || null })} className={input} placeholder="∞" title="Leave blank for open-ended (e.g. 7+ nights)" />
+                </div>
+                <div>
+                  <label className={label}>Single</label>
+                  <input type="number" value={t.singleOccupancy} onChange={e => updateTier(i, { singleOccupancy: parseFloat(e.target.value) || 0 })} className={input} />
+                </div>
+                <div>
+                  <label className={label}>{sharingLabel}</label>
+                  <input type="number" value={t.perPersonSharing} onChange={e => updateTier(i, { perPersonSharing: parseFloat(e.target.value) || 0 })} className={input} />
+                </div>
+                <div>
+                  <label className={label}>{tripleLabel}</label>
+                  <input type="number" value={t.triplePerPerson} onChange={e => updateTier(i, { triplePerPerson: parseFloat(e.target.value) || 0 })} className={input} />
+                </div>
+                <div>
+                  <label className={label}>{quadLabel}</label>
+                  <input type="number" value={t.quadPerPerson} onChange={e => updateTier(i, { quadPerPerson: parseFloat(e.target.value) || 0 })} className={input} />
+                </div>
+                <div>
+                  <label className={label}>Sgl Supp</label>
+                  <input type="number" value={t.singleSupplement} onChange={e => updateTier(i, { singleSupplement: parseFloat(e.target.value) || 0 })} className={input} />
+                </div>
+                <button type="button" onClick={() => removeTier(i)} className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-500">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+            <button type="button" onClick={addTier} className="text-[11px] text-primary hover:underline inline-flex items-center gap-1">
+              <Plus className="w-3 h-3" /> Add tier
+            </button>
+          </div>
+        )}
+      </div>
+
       <div className="flex justify-end">
         <button type="button" onClick={onRemove} disabled={!canRemove} className="text-[11px] text-muted-foreground hover:text-red-500 disabled:opacity-30 inline-flex items-center gap-1">
           <Trash2 className="w-3 h-3" /> Remove room
@@ -669,7 +745,7 @@ function SupplementsEditor({ supplements, currency, onChange }) {
 }
 
 // ─── ADD-ONS TAB ────────────────────────────────────────────────────────
-const ADD_ON_UNITS = ['per_person_per_day', 'per_day', 'per_trip', 'per_person', 'per_room_per_day'];
+const ADD_ON_UNITS = ['per_person_per_day', 'per_day', 'per_trip', 'per_person', 'per_room_per_day', 'per_vehicle'];
 function AddOnsTab({ addOns, currency, onChange }) {
   const add = () => onChange([
     ...addOns,
