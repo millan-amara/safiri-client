@@ -742,7 +742,17 @@ export default function PartnersPage() {
               {filtered.packages.length === 0 ? (
                 <EmptyState icon={Map} title="No packages" description="Add multi-day trails/packaged trips with pax-tiered pricing" />
               ) : filtered.packages.map((p) => {
-                const startTier = p.pricing?.paxTiers?.[0];
+                const allLists = (p.pricingLists || []).filter(l => l.isActive !== false);
+                let startTier = null;
+                let startList = null;
+                for (const l of allLists) {
+                  const t = (l.paxTiers || [])[0];
+                  if (t && (!startTier || t.pricePerPerson < startTier.pricePerPerson)) {
+                    startTier = t;
+                    startList = l;
+                  }
+                }
+                const audienceTags = Array.from(new Set(allLists.flatMap(l => l.audience || [])));
                 return (
                   <div key={p._id} className="bg-card rounded-xl border border-border p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 group hover:border-border transition-colors">
                     <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
@@ -755,7 +765,7 @@ export default function PartnersPage() {
                           {p.destination || '—'}
                           {p.durationNights > 0 && ` · ${p.durationNights} night${p.durationNights === 1 ? '' : 's'}`}
                           {p.segments?.length > 0 && ` · ${p.segments.length} camp${p.segments.length === 1 ? '' : 's'}`}
-                          {p.pricing?.audience?.length > 0 && ` · ${p.pricing.audience.join('/')}`}
+                          {audienceTags.length > 0 && ` · ${audienceTags.join('/')}`}
                         </p>
                       </div>
                     </div>
@@ -763,10 +773,12 @@ export default function PartnersPage() {
                       <div className="sm:text-right">
                         {startTier && (
                           <p className="text-sm font-bold text-foreground tabular-nums">
-                            from {formatCurrency(startTier.pricePerPerson, p.pricing?.currency)}/pp
+                            from {formatCurrency(startTier.pricePerPerson, startList?.currency)}/pp
                           </p>
                         )}
-                        <p className="text-[10px] text-muted-foreground/70">{p.pricing?.paxTiers?.length || 0} tier{p.pricing?.paxTiers?.length === 1 ? '' : 's'}</p>
+                        <p className="text-[10px] text-muted-foreground/70">
+                          {allLists.length} list{allLists.length === 1 ? '' : 's'}
+                        </p>
                       </div>
                       <div className="flex gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                         <button onClick={() => { setEditItem(p); setShowAddModal(true); }} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground/70 hover:text-foreground transition-colors">

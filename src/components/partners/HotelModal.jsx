@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Modal from '../shared/Modal';
 import ImageGallery from '../shared/ImageGallery';
 import RateListEditor, { emptyList } from './hotel/RateListEditor';
@@ -24,8 +24,48 @@ export default function HotelModal({ hotel, onClose, onSaved }) {
   // Extra hotels returned from a multi-hotel PDF that the user hasn't yet
   // loaded into this form or saved as separate records.
   const [pendingOtherHotels, setPendingOtherHotels] = useState([]);
+  // Packages surface from a PDF extraction that includes multi-camp trails
+  // alongside (or instead of) hotels. Maasai Trails is the canonical case.
+  // They're never loaded into this (hotel) form — saved as separate Package
+  // records via POST /partners/packages.
+  const [pendingPackages, setPendingPackages] = useState([]);
   const [batchSaving, setBatchSaving] = useState(false);
+  // Existing records in this org — used to show "Merge into existing" buttons
+  // on pending extracted items when the name matches something we already have.
+  const [existingHotels, setExistingHotels] = useState([]);
+  const [existingPackages, setExistingPackages] = useState([]);
   const pdfInputRef = useRef(null);
+
+  // Load matchable names on mount. Cheap — just names + ids.
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      api.get('/partners/hotels').catch(() => ({ data: { hotels: [] } })),
+      api.get('/partners/packages').catch(() => ({ data: { packages: [] } })),
+    ]).then(([h, p]) => {
+      if (cancelled) return;
+      setExistingHotels((h.data.hotels || []).map(x => ({ _id: x._id, name: x.name, destination: x.destination })));
+      setExistingPackages((p.data.packages || []).map(x => ({ _id: x._id, name: x.name })));
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Find an existing record whose name matches (case-insensitive, trimmed).
+  // If the current hotel record is being edited, exclude it from the hotel
+  // match list so the operator can't "merge into myself".
+  const findMatchingHotel = (name) => {
+    if (!name) return null;
+    const needle = String(name).toLowerCase().trim();
+    return existingHotels.find(h => {
+      if (isEdit && h._id === hotel?._id) return false;
+      return h.name?.toLowerCase().trim() === needle;
+    }) || null;
+  };
+  const findMatchingPackage = (name) => {
+    if (!name) return null;
+    const needle = String(name).toLowerCase().trim();
+    return existingPackages.find(p => p.name?.toLowerCase().trim() === needle) || null;
+  };
 
   const [form, setForm] = useState({
     name: hotel?.name || '',
@@ -139,39 +179,53 @@ export default function HotelModal({ hotel, onClose, onSaved }) {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       const drafts = (data.drafts || []).map(shapeExtractedHotel);
+      const packages = data.packages || [];
       const warnings = data.warnings || [];
       setExtractWarnings(warnings);
 
+      if (drafts.length === 0 && packages.length === 0) {
+        toast.error('No hotels or packages found in the PDF.');
+        return;
+      }
+
+      // Packages detected — always queued for save as separate Package records,
+      // regardless of whether there are hotels too.
+      if (packages.length > 0) {
+        setPendingPackages(prev => [...prev, ...packages]);
+      }
+
       if (drafts.length === 0) {
-        toast.error('No hotels found in the PDF.');
+        // Packages-only document (Maasai Trails etc.). Nothing to load into
+        // this hotel form — surface the packages via the banner.
+        toast(`Found ${packages.length} package${packages.length === 1 ? '' : 's'} — see blue banner below to save as Packages.`, { icon: '📑', duration: 7000 });
         return;
       }
 
       if (drafts.length === 1) {
         const d = drafts[0];
         loadExtractedIntoForm(d);
+        const note = packages.length > 0 ? ` (plus ${packages.length} package${packages.length === 1 ? '' : 's'} queued)` : '';
         if (warnings.length) {
-          toast(`Extracted with ${warnings.length} warning(s) — see banner above the form`, { icon: '⚠️', duration: 6000 });
+          toast(`Extracted with ${warnings.length} warning(s) — see banner above the form${note}`, { icon: '⚠️', duration: 6000 });
         } else {
           const rateCount = (d.rateLists || []).length;
           if (rateCount > 0) {
-            toast.success(`Extracted ${rateCount} rate list(s). Review and save.`);
+            toast.success(`Extracted ${rateCount} rate list(s)${note}.`);
           } else {
-            // Info/T&C-only document — describe what we actually pulled in.
             const bits = [];
             if (d.description) bits.push('description');
             if ((d.amenities || []).length) bits.push(`${(d.amenities || []).length} amenities`);
-            toast.success(bits.length ? `Extracted ${bits.join(' + ')} into Basics tab.` : 'No rate or property data found in this PDF.');
+            toast.success(bits.length ? `Extracted ${bits.join(' + ')} into Basics tab${note}.` : 'No rate or property data found in this PDF.');
           }
         }
         return;
       }
 
-      // Multiple hotels: load the first one into the current form, keep the
-      // rest as "pending" so the operator can choose what to do with them.
+      // Multiple hotels: load the first into the form, rest go into the banner.
       loadExtractedIntoForm(drafts[0]);
       setPendingOtherHotels(drafts.slice(1));
-      toast(`Found ${drafts.length} hotels — "${drafts[0].name}" loaded here. See banner for the other ${drafts.length - 1}.`, { icon: '📑', duration: 7000 });
+      const pkgNote = packages.length > 0 ? ` and ${packages.length} package${packages.length === 1 ? '' : 's'}` : '';
+      toast(`Found ${drafts.length} hotels${pkgNote} — "${drafts[0].name}" loaded here. See banner for the rest.`, { icon: '📑', duration: 7000 });
     } catch (err) {
       toast.error(err.response?.data?.message || 'PDF extraction failed');
     } finally {
@@ -249,6 +303,140 @@ export default function HotelModal({ hotel, onClose, onSaved }) {
     }
   };
 
+  // Merge one extracted package's pricing lists into an existing package
+  // record (by _id). Server appends any list whose `name` isn't already present.
+  const mergeExtractedPackageInto = async (existingId, idx) => {
+    const d = pendingPackages[idx];
+    if (!d || !existingId) return;
+    const toDateOrNull = (v) => v ? new Date(v) : null;
+    const normalizedLists = (d.pricingLists || []).map(list => ({
+      ...list,
+      validFrom: toDateOrNull(list.validFrom),
+      validTo: toDateOrNull(list.validTo),
+      priority: Number(list.priority) || 0,
+      singleSupplement: Number(list.singleSupplement) || 0,
+      paxTiers: (list.paxTiers || []).map(t => ({
+        minPax: Number(t.minPax) || 1,
+        maxPax: Number(t.maxPax) || 99,
+        pricePerPerson: Number(t.pricePerPerson) || 0,
+      })),
+      childBrackets: (list.childBrackets || []).map(b => ({
+        ...b,
+        minAge: Number(b.minAge) || 0,
+        maxAge: Number(b.maxAge) || 17,
+        value: Number(b.value) || 0,
+      })),
+    }));
+    try {
+      const { data } = await api.put(`/partners/packages/${existingId}/merge-pricing-lists`, {
+        pricingLists: normalizedLists,
+        cancellationTiers: (d.cancellationTiers || []).map(t => ({
+          daysBefore: Number(t.daysBefore) || 0,
+          penaltyPct: Number(t.penaltyPct) || 0,
+          notes: t.notes || '',
+        })),
+        bookingTerms: d.bookingTerms || '',
+        depositPct: Number(d.depositPct) || 0,
+        description: d.description || '',
+      });
+      const appended = (data.appendedListNames || []).length;
+      const skipped = normalizedLists.length - appended;
+      toast.success(
+        appended
+          ? `Merged ${appended} pricing list(s) into "${d.name}"${skipped ? ` (${skipped} duplicate${skipped === 1 ? '' : 's'} skipped)` : ''}`
+          : `No new pricing lists to add — "${d.name}" already has all ${normalizedLists.length}`
+      );
+      setPendingPackages(prev => prev.filter((_, i) => i !== idx));
+      onSaved?.();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Merge failed');
+    }
+  };
+
+  // Merge one extracted hotel's rate lists into an existing hotel.
+  const mergeExtractedHotelInto = async (existingId, idx) => {
+    const d = pendingOtherHotels[idx];
+    if (!d || !existingId) return;
+    try {
+      const normalizedLists = (d.rateLists || []).map(normalizeList);
+      const { data } = await api.put(`/partners/hotels/${existingId}/merge-rate-lists`, {
+        rateLists: normalizedLists,
+        description: d.description || '',
+        amenities: Array.isArray(d.amenities) ? d.amenities : [],
+      });
+      const appended = (data.appendedListNames || []).length;
+      const skipped = normalizedLists.length - appended;
+      toast.success(
+        appended
+          ? `Merged ${appended} rate list(s) into "${d.name}"${skipped ? ` (${skipped} duplicate${skipped === 1 ? '' : 's'} skipped)` : ''}`
+          : `No new rate lists to add — "${d.name}" already has all ${normalizedLists.length}`
+      );
+      setPendingOtherHotels(prev => prev.filter((_, i) => i !== idx));
+      onSaved?.();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Merge failed');
+    }
+  };
+
+  // POST each pending package as a new Package record. Normalizes dates,
+  // pax tiers, and child brackets the same way the manual PackageModal does.
+  const saveAllPendingPackages = async () => {
+    if (!pendingPackages.length) return;
+    setBatchSaving(true);
+    try {
+      const toDateOrNull = (v) => v ? new Date(v) : null;
+      for (const p of pendingPackages) {
+        const payload = {
+          name: p.name || 'Untitled Package',
+          destination: p.destination || '',
+          description: p.description || '',
+          durationNights: Number(p.durationNights) || 0,
+          durationDays: Number(p.durationDays) || 0,
+          segments: (p.segments || []).map(s => ({
+            startDay: Number(s.startDay) || 1,
+            endDay: Number(s.endDay) || 1,
+            location: s.location || '',
+            hotelName: s.hotelName || '',
+            notes: s.notes || '',
+          })),
+          pricingLists: (p.pricingLists || []).map(list => ({
+            ...list,
+            validFrom: toDateOrNull(list.validFrom),
+            validTo: toDateOrNull(list.validTo),
+            priority: Number(list.priority) || 0,
+            singleSupplement: Number(list.singleSupplement) || 0,
+            paxTiers: (list.paxTiers || []).map(t => ({
+              minPax: Number(t.minPax) || 1,
+              maxPax: Number(t.maxPax) || 99,
+              pricePerPerson: Number(t.pricePerPerson) || 0,
+            })),
+            childBrackets: (list.childBrackets || []).map(b => ({
+              ...b,
+              minAge: Number(b.minAge) || 0,
+              maxAge: Number(b.maxAge) || 17,
+              value: Number(b.value) || 0,
+            })),
+          })),
+          cancellationTiers: (p.cancellationTiers || []).map(t => ({
+            daysBefore: Number(t.daysBefore) || 0,
+            penaltyPct: Number(t.penaltyPct) || 0,
+            notes: t.notes || '',
+          })),
+          depositPct: Number(p.depositPct) || 30,
+          bookingTerms: p.bookingTerms || '',
+        };
+        await api.post('/partners/packages', payload);
+      }
+      toast.success(`Saved ${pendingPackages.length} package${pendingPackages.length === 1 ? '' : 's'}`);
+      setPendingPackages([]);
+      onSaved?.();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to save packages');
+    } finally {
+      setBatchSaving(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.name || !form.destination) { toast.error('Name and destination are required'); return; }
@@ -279,6 +467,77 @@ export default function HotelModal({ hotel, onClose, onSaved }) {
   return (
     <Modal title={isEdit ? 'Edit Hotel' : 'Add Hotel'} onClose={onClose} xwide persistent>
       <form onSubmit={handleSubmit} className="space-y-4">
+        {pendingPackages.length > 0 && (
+          <div className="rounded-lg border border-purple-200 bg-purple-50 p-3">
+            <div className="flex items-start gap-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-purple-900">
+                  {pendingPackages.length} package{pendingPackages.length === 1 ? '' : 's'} found in the PDF
+                </p>
+                <p className="text-[11px] text-purple-800/80 mt-0.5">
+                  These are multi-camp trails (priced per trip, not per night) — they'll be saved as Package records, not hotels.
+                </p>
+                <ul className="mt-2 space-y-1.5">
+                  {pendingPackages.map((p, i) => {
+                    const match = findMatchingPackage(p.name);
+                    return (
+                      <li key={i} className="flex items-center gap-2 text-xs px-2 py-1.5 rounded bg-white border border-purple-200 text-purple-900">
+                        <span className="flex-1 min-w-0">
+                          <div className="truncate">
+                            <span className="font-medium">{p.name || 'Untitled package'}</span>
+                            {p.durationNights > 0 && <span className="text-purple-700/70"> · {p.durationNights}n</span>}
+                            {(p.segments || []).length > 0 && <span className="text-purple-700/70"> · {(p.segments || []).length} camp{(p.segments || []).length === 1 ? '' : 's'}</span>}
+                            {(p.pricingLists || []).length > 0 && <span className="text-purple-700/70"> · {(p.pricingLists || []).length} pricing list{(p.pricingLists || []).length === 1 ? '' : 's'}</span>}
+                          </div>
+                          {match && (
+                            <div className="text-[10px] text-purple-700/80 mt-0.5">
+                              ✓ Existing package found — click "Merge" to append new pricing lists only.
+                            </div>
+                          )}
+                        </span>
+                        {match && (
+                          <button
+                            type="button"
+                            onClick={() => mergeExtractedPackageInto(match._id, i)}
+                            className="px-2 py-0.5 rounded bg-purple-600 text-white text-[10px] font-medium hover:bg-purple-700 shrink-0"
+                          >
+                            Merge
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setPendingPackages(prev => prev.filter((_, idx) => idx !== i))}
+                          className="p-1 rounded text-purple-700/60 hover:text-red-500 shrink-0"
+                          title="Discard this package"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <div className="mt-2.5 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={saveAllPendingPackages}
+                    disabled={batchSaving}
+                    className="px-3 py-1 rounded bg-purple-600 text-white text-[11px] font-medium hover:bg-purple-700 transition-colors disabled:opacity-50"
+                  >
+                    {batchSaving ? 'Saving…' : `Save all ${pendingPackages.length} as new packages`}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingPackages([])}
+                    className="px-3 py-1 rounded bg-white border border-purple-200 text-purple-700 text-[11px] font-medium hover:border-purple-400 transition-colors"
+                  >
+                    Dismiss all
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {pendingOtherHotels.length > 0 && (
           <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
             <div className="flex items-start gap-2">
@@ -289,28 +548,47 @@ export default function HotelModal({ hotel, onClose, onSaved }) {
                 <p className="text-[11px] text-blue-800/80 mt-0.5">
                   Click a name to swap it into this form (the current hotel will swap into the list). Or save them all as separate hotels now.
                 </p>
-                <ul className="mt-2 space-y-1">
-                  {pendingOtherHotels.map((h, i) => (
-                    <li key={i} className="flex items-center gap-2 text-xs">
-                      <button
-                        type="button"
-                        onClick={() => swapToPending(i)}
-                        className="flex-1 text-left px-2 py-1 rounded bg-white border border-blue-200 text-blue-900 hover:border-blue-400 transition-colors"
-                      >
-                        <span className="font-medium">{h.name || 'Untitled hotel'}</span>
-                        {h.destination && <span className="text-blue-700/70"> · {h.destination}</span>}
-                        <span className="text-blue-700/60 ml-1">· {(h.rateLists || []).length} rate list{(h.rateLists || []).length === 1 ? '' : 's'}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => dismissPending(i)}
-                        className="p-1 rounded text-blue-700/60 hover:text-red-500"
-                        title="Discard this hotel"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </li>
-                  ))}
+                <ul className="mt-2 space-y-1.5">
+                  {pendingOtherHotels.map((h, i) => {
+                    const match = findMatchingHotel(h.name);
+                    return (
+                      <li key={i} className="flex items-center gap-2 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => swapToPending(i)}
+                          className="flex-1 text-left px-2 py-1.5 rounded bg-white border border-blue-200 text-blue-900 hover:border-blue-400 transition-colors"
+                        >
+                          <div>
+                            <span className="font-medium">{h.name || 'Untitled hotel'}</span>
+                            {h.destination && <span className="text-blue-700/70"> · {h.destination}</span>}
+                            <span className="text-blue-700/60 ml-1">· {(h.rateLists || []).length} rate list{(h.rateLists || []).length === 1 ? '' : 's'}</span>
+                          </div>
+                          {match && (
+                            <div className="text-[10px] text-blue-700/80 mt-0.5">
+                              ✓ Existing hotel found — or click "Merge" to append new rate lists only.
+                            </div>
+                          )}
+                        </button>
+                        {match && (
+                          <button
+                            type="button"
+                            onClick={() => mergeExtractedHotelInto(match._id, i)}
+                            className="px-2 py-0.5 rounded bg-blue-600 text-white text-[10px] font-medium hover:bg-blue-700 shrink-0"
+                          >
+                            Merge
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => dismissPending(i)}
+                          className="p-1 rounded text-blue-700/60 hover:text-red-500"
+                          title="Discard this hotel"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
                 <div className="mt-2.5 flex gap-2">
                   <button

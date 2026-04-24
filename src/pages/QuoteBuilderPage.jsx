@@ -100,6 +100,7 @@ export default function QuoteBuilderPage() {
         childAges: quote.travelers.childAges || [],
         quoteCurrency: quote.pricing.currency,
         clientType: quote.clientType,
+        startDate: quote.startDate || undefined,
       });
       if (!data.ok) {
         toast.error(`Can't price package: ${data.reason}`);
@@ -116,7 +117,7 @@ export default function QuoteBuilderPage() {
           location: seg?.location || '',
           isTransitDay: false,
           narrative: seg?.notes || '',
-          meals: { breakfast: pkg.pricing?.mealPlan && pkg.pricing.mealPlan !== 'RO', lunch: false, dinner: false, notes: '' },
+          meals: { breakfast: data.pricingList?.mealPlan && data.pricingList.mealPlan !== 'RO', lunch: false, dinner: false, notes: '' },
           hotel: hotelName ? {
             hotelId: seg?.hotel?._id || seg?.hotel || null,
             name: hotelName,
@@ -124,9 +125,9 @@ export default function QuoteBuilderPage() {
             images: [],
             ratePerNight: 0,
             ratePerNightInQuoteCurrency: 0,
-            sourceCurrency: pkg.pricing?.currency,
-            mealPlan: pkg.pricing?.mealPlan,
-            rateListName: `${pkg.name} (package)`,
+            sourceCurrency: data.sourceCurrency,
+            mealPlan: data.pricingList?.mealPlan,
+            rateListName: `${pkg.name} (package · ${data.pricingList?.name || ''})`,
           } : null,
           roomType: '',
           activities: [],
@@ -783,7 +784,19 @@ export default function QuoteBuilderPage() {
                   </div>
                   <div className="p-4 overflow-y-auto space-y-2">
                     {packages.map(p => {
-                      const startTier = p.pricing?.paxTiers?.[0];
+                      // Show the cheapest starting tier across all pricing lists,
+                      // labeled with the matching list's currency.
+                      const allLists = (p.pricingLists || []).filter(l => l.isActive !== false);
+                      let startTier = null;
+                      let startList = null;
+                      for (const l of allLists) {
+                        const t = (l.paxTiers || [])[0];
+                        if (t && (!startTier || t.pricePerPerson < startTier.pricePerPerson)) {
+                          startTier = t;
+                          startList = l;
+                        }
+                      }
+                      const audienceTags = Array.from(new Set(allLists.flatMap(l => l.audience || [])));
                       return (
                         <button
                           key={p._id}
@@ -796,12 +809,12 @@ export default function QuoteBuilderPage() {
                               <p className="text-xs text-muted-foreground mt-0.5">
                                 {p.destination || '—'}
                                 {p.durationDays > 0 && ` · ${p.durationDays} days / ${p.durationNights} nights`}
-                                {p.pricing?.audience?.length > 0 && ` · ${p.pricing.audience.join('/')}`}
+                                {audienceTags.length > 0 && ` · ${audienceTags.join('/')}`}
                               </p>
                             </div>
                             {startTier && (
                               <span className="text-xs font-bold text-foreground whitespace-nowrap">
-                                from {formatCurrency(startTier.pricePerPerson, p.pricing?.currency)}/pp
+                                from {formatCurrency(startTier.pricePerPerson, startList?.currency)}/pp
                               </span>
                             )}
                           </div>
