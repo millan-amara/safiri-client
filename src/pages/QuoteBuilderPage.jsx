@@ -2,14 +2,14 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
-import { formatCurrency, cldThumb } from '../utils/helpers';
+import { formatCurrency, cldThumb, formatDuration } from '../utils/helpers';
 import toast from 'react-hot-toast';
 import QuoteRenderer from '../components/quote/QuoteRenderer';
 import {
   ArrowLeft, Plus, GripVertical, Trash2, MapPin, Hotel, Ticket, FileText,
   Truck, DollarSign, Save, Send, Eye, ChevronDown, ChevronUp,
   Sparkles, X, Calendar, Users as UsersIcon, Copy, Image as ImageIcon,
-  Coffee, Sun, Sunset, Star, EyeOff, CheckCircle,
+  Coffee, Sun, Sunset, Star, EyeOff, CheckCircle, Clock, AlertTriangle,
 } from 'lucide-react';
 
 export default function QuoteBuilderPage() {
@@ -89,9 +89,12 @@ export default function QuoteBuilderPage() {
     });
   }, []);
 
-  // Apply a package: populates quote.days from its segments and adds a single
-  // line item for the package's priced total (flat-price, no markup — the
-  // operator can override in the line-items editor if they want).
+  // Apply a package: populates quote.days from the (server-hydrated) segments
+  // and adds a single line item for the package's priced total. Each day's
+  // hotel snapshot now carries the linked Hotel doc's display fields
+  // (description, images, amenities, etc.) so the share page renders properly.
+  // Package-level metadata (tier, cancellation, deposit, booking terms) is
+  // stashed on quote.packageSnapshot for the policy blocks to render.
   const applyPackage = async (pkg) => {
     if (quote.days?.length > 0 && !confirm('This will replace your current itinerary. Continue?')) return;
     try {
@@ -106,28 +109,56 @@ export default function QuoteBuilderPage() {
         toast.error(`Can't price package: ${data.reason}`);
         return;
       }
+
+      // Use the SERVER-populated segments (which now include the linked Hotel
+      // doc on each segment), not pkg.segments — the client copy only has the
+      // ObjectId ref, not the full hotel record.
+      const segments = data.segments || [];
       const days = [];
-      const dur = pkg.durationDays || (pkg.durationNights ? pkg.durationNights + 1 : pkg.segments?.length || 1);
+      const dur = data.package?.durationDays || (data.package?.durationNights ? data.package.durationNights + 1 : segments.length || 1);
       for (let i = 1; i <= dur; i++) {
-        const seg = (pkg.segments || []).find(s => i >= (s.startDay || 1) && i <= (s.endDay || 1));
-        const hotelName = seg?.hotelName || seg?.hotel?.name || '';
+        const seg = segments.find(s => i >= (s.startDay || 1) && i <= (s.endDay || 1));
+        const linkedHotel = seg?.hotel || null;
+        const displayHotelName = linkedHotel?.name || seg?.hotelName || '';
+
         days.push({
           dayNumber: i,
           title: seg?.location ? `Day ${i} — ${seg.location}` : `Day ${i}`,
-          location: seg?.location || '',
+          location: seg?.location || linkedHotel?.location || linkedHotel?.destination || '',
           isTransitDay: false,
           narrative: seg?.notes || '',
-          meals: { breakfast: data.pricingList?.mealPlan && data.pricingList.mealPlan !== 'RO', lunch: false, dinner: false, notes: '' },
-          hotel: hotelName ? {
-            hotelId: seg?.hotel?._id || seg?.hotel || null,
-            name: hotelName,
-            description: '',
-            images: [],
+          meals: {
+            breakfast: data.pricingList?.mealPlan && data.pricingList.mealPlan !== 'RO',
+            lunch: ['FB', 'AI', 'GAME_PACKAGE'].includes(data.pricingList?.mealPlan),
+            dinner: ['HB', 'FB', 'AI', 'GAME_PACKAGE'].includes(data.pricingList?.mealPlan),
+            notes: '',
+          },
+          hotel: displayHotelName ? {
+            hotelId: seg?.hotelId || linkedHotel?._id || null,
+            name: displayHotelName,
+            description: linkedHotel?.description || '',
+            images: linkedHotel?.images || [],
+            // Hotel-level enrichment from the linked partner doc
+            location: linkedHotel?.location || '',
+            type: linkedHotel?.type || '',
+            stars: linkedHotel?.stars || null,
+            amenities: linkedHotel?.amenities || [],
+            contactEmail: linkedHotel?.contactEmail || '',
+            contactPhone: linkedHotel?.contactPhone || '',
+            coordinates: linkedHotel?.coordinates || null,
+            tags: linkedHotel?.tags || [],
+            // Package nights are flat-priced — pricing fields stay zero so
+            // dayCost rollup ignores them; the package total lives as a
+            // single line item.
             ratePerNight: 0,
             ratePerNightInQuoteCurrency: 0,
             sourceCurrency: data.sourceCurrency,
             mealPlan: data.pricingList?.mealPlan,
-            rateListName: `${pkg.name} (package · ${data.pricingList?.name || ''})`,
+            mealPlanLabel: data.pricingList?.mealPlanLabel || '',
+            rateListName: `${data.package?.name || pkg.name} (package · ${data.pricingList?.name || ''})`,
+            // Flag so renderer/PDF can suppress per-night pricing UI for
+            // package nights without having to re-derive it from context.
+            isPackageNight: true,
           } : null,
           roomType: '',
           activities: [],
@@ -136,18 +167,63 @@ export default function QuoteBuilderPage() {
           dayCost: 0,   // package is flat-priced; per-day cost tracked as one line item
         });
       }
+
+      // Snapshot of package-level info that doesn't fit on a day. Surfaced by
+      // the policy / payment-terms blocks (Chunk 6 renders this).
+      const packageSnapshot = {
+        packageId: data.package?._id,
+        name: data.package?.name,
+        description: data.package?.description,
+        durationNights: data.package?.durationNights,
+        durationDays: data.package?.durationDays,
+        images: data.package?.images || [],
+        pricingListName: data.pricingList?.name,
+        audience: data.pricingList?.audience,
+        mealPlan: data.pricingList?.mealPlan,
+        mealPlanLabel: data.pricingList?.mealPlanLabel,
+        seasonLabel: data.pricingList?.seasonLabel,
+        notes: data.pricingList?.notes,
+        tier: data.tier,
+        adults: data.adults,
+        childAges: data.childAges,
+        adultTotal: data.adultTotal,
+        singleSupplement: data.singleSupplement,
+        childTotal: data.childTotal,
+        childrenBreakdown: data.childrenBreakdown,
+        sourceCurrency: data.sourceCurrency,
+        quoteCurrency: data.quoteCurrency,
+        fxRate: data.fxRate,
+        subtotalSource: data.subtotalSource,
+        subtotalInQuoteCurrency: data.subtotalInQuoteCurrency,
+        cancellationTiers: data.cancellationTiers || [],
+        depositPct: data.depositPct || 0,
+        bookingTerms: data.bookingTerms || '',
+        warnings: data.warnings || [],
+      };
+
+      // Pick a cover image: prefer existing quote cover, else the package's
+      // hero image, else nothing (render falls back to first day's image).
+      const packageHero = (data.package?.images || []).find(img => img.isHero) || (data.package?.images || [])[0];
+      const coverImage = quote.coverImage || (packageHero ? { url: packageHero.url, caption: packageHero.caption || '', source: 'package' } : null);
+
       setQuote({
         ...quote,
-        title: quote.title || pkg.name,
+        title: quote.title || data.package?.name || pkg.name,
+        coverNarrative: quote.coverNarrative || data.package?.description || '',
+        coverImage,
         days,
         inclusions: [...new Set([...(quote.inclusions || []), ...((data.inclusions || []))])],
         exclusions: [...new Set([...(quote.exclusions || []), ...((data.exclusions || []))])],
+        // If the operator hasn't set their own payment terms, seed from the
+        // package's bookingTerms so the policy block isn't blank.
+        paymentTerms: quote.paymentTerms || data.bookingTerms || '',
+        packageSnapshot,
         pricing: {
           ...quote.pricing,
           lineItems: [
             ...(quote.pricing.lineItems || []),
             {
-              description: `${pkg.name} — ${data.tier.minPax}-${data.tier.maxPax} pax package (${quote.travelers.adults} adult${quote.travelers.adults === 1 ? '' : 's'}${data.childAges.length ? ', ' + data.childAges.length + ' child' + (data.childAges.length === 1 ? '' : 'ren') : ''})`,
+              description: `${data.package?.name || pkg.name} — ${data.tier.minPax}-${data.tier.maxPax} pax package (${quote.travelers.adults} adult${quote.travelers.adults === 1 ? '' : 's'}${data.childAges.length ? ', ' + data.childAges.length + ' child' + (data.childAges.length === 1 ? '' : 'ren') : ''})`,
               quantity: 1,
               unitPrice: Math.round(data.subtotalInQuoteCurrency),
               total: Math.round(data.subtotalInQuoteCurrency),
@@ -156,7 +232,10 @@ export default function QuoteBuilderPage() {
         },
       });
       setShowPackagePicker(false);
-      toast.success(`Applied "${pkg.name}" — ${dur} days`);
+      toast.success(`Applied "${data.package?.name || pkg.name}" — ${dur} days`);
+      if (data.warnings?.length) {
+        data.warnings.slice(0, 2).forEach(w => toast(w, { icon: '⚠️' }));
+      }
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to apply package');
     }
@@ -208,6 +287,11 @@ export default function QuoteBuilderPage() {
   const addDay = (afterIdx = null) => {
     const days = [...(quote.days || [])];
     const lastDay = days[days.length - 1];
+    // Don't auto-inherit the previous day's hotel snapshot. The snapshot is
+    // priced for that night's date, season, and stay-tier — copying it onto
+    // a new day would carry the wrong rate (and silently inflate the total
+    // when updateDay later sums it into dayCost). Operator re-picks per day
+    // so each night is priced correctly.
     const newDay = {
       dayNumber: days.length + 1,
       title: '',
@@ -215,8 +299,8 @@ export default function QuoteBuilderPage() {
       isTransitDay: false,
       narrative: '',
       meals: { breakfast: false, lunch: false, dinner: false, notes: '' },
-      hotel: lastDay?.hotel || null,
-      roomType: lastDay?.roomType || '',
+      hotel: null,
+      roomType: '',
       activities: [],
       transport: null,
       images: [],
@@ -237,12 +321,13 @@ export default function QuoteBuilderPage() {
     const days = [...quote.days];
     days[index] = { ...days[index], ...updates };
 
-    // Auto-calc day cost. Prefer the quote-currency rate (converted via FX
-    // at hotel-pick time) over the raw source-currency rate.
+    // Auto-calc day cost. Prefer the quote-currency value (converted via FX
+    // at pick time) over the raw source-currency value, so a USD quote with
+    // KES activities doesn't silently mix currencies in the total.
     const day = days[index];
     const hotelCost = day.hotel?.ratePerNightInQuoteCurrency || day.hotel?.ratePerNight || 0;
-    const actCost = day.activities?.reduce((s, a) => s + (a.totalCost || 0), 0) || 0;
-    const transCost = day.transport?.totalCost || 0;
+    const actCost = day.activities?.reduce((s, a) => s + (a.totalCostInQuoteCurrency ?? a.totalCost ?? 0), 0) || 0;
+    const transCost = day.transport?.totalCostInQuoteCurrency ?? day.transport?.totalCost ?? 0;
     days[index].dayCost = hotelCost + actCost + transCost;
 
     setQuote({ ...quote, days });
@@ -265,22 +350,62 @@ export default function QuoteBuilderPage() {
     setExpandedDay(newIdx);
   };
 
+  // Duplicate a day's content (narrative, meals, images, hotel/activity
+  // *picks*) but reset all pricing — the duplicated day is for a different
+  // date, so the original rates and FX may not apply. Operator re-confirms
+  // the picks on the new day to re-trigger pricing.
   const duplicateDay = (index) => {
     const days = [...quote.days];
     const copy = JSON.parse(JSON.stringify(days[index]));
     copy._id = undefined;
+    if (copy.hotel) {
+      // Keep display fields (the partner doc didn't change), drop pricing.
+      copy.hotel = {
+        hotelId: copy.hotel.hotelId,
+        name: copy.hotel.name,
+        description: copy.hotel.description,
+        images: copy.hotel.images || [],
+        location: copy.hotel.location || '',
+        type: copy.hotel.type || '',
+        stars: copy.hotel.stars || null,
+        amenities: copy.hotel.amenities || [],
+        coordinates: copy.hotel.coordinates || null,
+        contactEmail: copy.hotel.contactEmail || '',
+        contactPhone: copy.hotel.contactPhone || '',
+        tags: copy.hotel.tags || [],
+        // pricing fields cleared: ratePerNight, ratePerNightInQuoteCurrency,
+        // supplements, passThroughFees, addOns, seasonLabel, fxRate, etc.
+      };
+      copy.roomType = '';
+    }
+    if (Array.isArray(copy.activities)) {
+      copy.activities = copy.activities.map(a => ({
+        ...a,
+        totalCost: 0,
+        totalCostInQuoteCurrency: 0,
+        sourceCurrency: undefined,
+        fxRate: undefined,
+      }));
+    }
+    if (copy.transport) {
+      copy.transport = {
+        ...copy.transport,
+        totalCost: 0,
+        totalCostInQuoteCurrency: 0,
+      };
+    }
+    copy.dayCost = 0;
     days.splice(index + 1, 0, copy);
     days.forEach((d, i) => d.dayNumber = i + 1);
     setQuote({ ...quote, days });
     setExpandedDay(index + 1);
   };
 
-  // Pick a hotel for a day and let the server's rate resolver compute the
-  // nightly cost against the quote's clientType + party + currency. Falls
-  // back to a thin snapshot if pricing can't be resolved.
-  const selectHotelForDay = async (dayIndex, hotel, opts = {}) => {
-    const checkIn = quote.startDate ? new Date(quote.startDate) : new Date();
-    checkIn.setDate(checkIn.getDate() + dayIndex);
+  // Pure price + snapshot construction — no state mutation. Returns
+  // { snapshot, roomType, error, warnings } so callers can either commit it
+  // via updateDay (single hotel pick) or fold it into a multi-field state
+  // update (extend-stay, where we also insert a new day in the same beat).
+  const priceHotelForCheckIn = async (hotel, checkIn, opts = {}) => {
     const checkOut = new Date(checkIn);
     checkOut.setDate(checkOut.getDate() + 1);
 
@@ -288,7 +413,15 @@ export default function QuoteBuilderPage() {
       hotelId: hotel._id,
       name: hotel.name,
       images: hotel.images || [],
-      description: hotel.description,
+      description: hotel.description || '',
+      location: hotel.location || '',
+      type: hotel.type || '',
+      stars: hotel.stars || null,
+      amenities: hotel.amenities || [],
+      coordinates: hotel.coordinates || null,
+      contactEmail: hotel.contactEmail || '',
+      contactPhone: hotel.contactPhone || '',
+      tags: hotel.tags || [],
     };
 
     try {
@@ -306,8 +439,8 @@ export default function QuoteBuilderPage() {
 
       if (data.ok) {
         const night = data.nightly?.[0] || {};
-        updateDay(dayIndex, {
-          hotel: {
+        return {
+          snapshot: {
             ...baseSnapshot,
             rateListId: data.rateList._id,
             rateListName: data.rateList.name,
@@ -318,56 +451,232 @@ export default function QuoteBuilderPage() {
             fxRate: data.fxRate,
             roomType: data.roomType,
             seasonLabel: night.season,
+            // night.total now includes per-night mandatory add-ons (resort
+            // fees, conservancy access, etc.) rolled in by the server.
             ratePerNight: night.total || 0,
             ratePerNightInQuoteCurrency: (night.total || 0) * (data.fxRate || 1),
             supplements: night.supplements || [],
             passThroughFees: data.passThroughFees,
             addOns: data.addOns,
+            // Mandatory add-ons surfaced separately for transparency: the
+            // renderer can show "*nightly includes $X in mandatory fees*".
+            mandatoryAddOnsPerNight: data.mandatoryAddOnsPerNight || [],
+            mandatoryAddOnsPerNightTotal: data.mandatoryAddOnsPerNightTotal || 0,
             cancellationTiers: data.cancellationTiers,
             depositPct: data.depositPct,
+            bookingTerms: data.bookingTerms || '',
+            rateListNotes: data.notes || '',
             inclusions: data.inclusions || [],
             exclusions: data.exclusions || [],
             warnings: data.warnings,
           },
           roomType: data.roomType || '',
-        });
-        if (data.warnings?.length) {
-          data.warnings.slice(0, 2).forEach(w => toast(w, { icon: '⚠️' }));
-        }
-      } else {
-        updateDay(dayIndex, {
-          hotel: { ...baseSnapshot, ratePerNight: 0, ratePerNightInQuoteCurrency: 0, warnings: [data.reason] },
-        });
-        toast.error(`No rate resolved: ${data.reason || 'unknown'}`);
+          warnings: data.warnings || [],
+        };
       }
+      return {
+        snapshot: { ...baseSnapshot, ratePerNight: 0, ratePerNightInQuoteCurrency: 0, warnings: [data.reason] },
+        roomType: '',
+        error: data.reason || 'unknown',
+        warnings: [],
+      };
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Pricing failed');
-      updateDay(dayIndex, { hotel: { ...baseSnapshot, ratePerNight: 0, ratePerNightInQuoteCurrency: 0 } });
+      return {
+        snapshot: { ...baseSnapshot, ratePerNight: 0, ratePerNightInQuoteCurrency: 0 },
+        roomType: '',
+        error: err.response?.data?.message || 'Pricing failed',
+        warnings: [],
+      };
     }
   };
 
-  const addActivityToDay = (dayIndex, activity) => {
-    const day = quote.days[dayIndex];
-    const totalPax = quote.travelers.adults + quote.travelers.children;
-    const totalCost = activity.pricingModel === 'per_person'
-      ? activity.costPerPerson * totalPax
-      : activity.groupRate || activity.costPerPerson;
+  // Pick a hotel for a day and let the server's rate resolver compute the
+  // nightly cost against the quote's clientType + party + currency. Falls
+  // back to a thin snapshot if pricing can't be resolved.
+  const selectHotelForDay = async (dayIndex, hotel, opts = {}) => {
+    const checkIn = quote.startDate ? new Date(quote.startDate) : new Date();
+    checkIn.setDate(checkIn.getDate() + dayIndex);
+    const result = await priceHotelForCheckIn(hotel, checkIn, opts);
+    if (result.error) toast.error(`No rate resolved: ${result.error}`);
+    if (result.warnings.length) result.warnings.slice(0, 2).forEach(w => toast(w, { icon: '⚠️' }));
+    updateDay(dayIndex, { hotel: result.snapshot, roomType: result.roomType });
+  };
 
-    const newAct = {
+  // Extend an existing hotel-night by inserting another day after it and
+  // re-pricing the same partner hotel for the new date. Restores the
+  // multi-night convenience without inheriting a stale per-night rate
+  // (different season / stay-tier may apply to the new night). Composes the
+  // insert + the priced snapshot into a single setQuote call to dodge the
+  // closure-staleness race that would lose the insert if updateDay ran on
+  // top of an outdated quote.days.
+  const extendStayFromDay = async (dayIndex) => {
+    const sourceDay = quote.days[dayIndex];
+    if (!sourceDay?.hotel?.hotelId) return;
+    const sourceHotel = hotels.find(h => h._id === sourceDay.hotel.hotelId);
+    if (!sourceHotel) {
+      toast.error('Original hotel is no longer in your partners list — pick manually.');
+      return;
+    }
+
+    const newDayIndex = dayIndex + 1;
+    const checkIn = quote.startDate ? new Date(quote.startDate) : new Date();
+    checkIn.setDate(checkIn.getDate() + newDayIndex);
+
+    const result = await priceHotelForCheckIn(sourceHotel, checkIn, {
+      preferredRoomType: sourceDay.hotel.roomType,
+      preferredMealPlan: sourceDay.hotel.mealPlan,
+    });
+    if (result.error) toast.error(`Could not re-price for new night: ${result.error}`);
+    result.warnings.slice(0, 2).forEach(w => toast(w, { icon: '⚠️' }));
+
+    const days = [...quote.days];
+    const newDay = {
+      dayNumber: newDayIndex + 1,
+      title: '',
+      location: sourceDay.location || '',
+      isTransitDay: false,
+      narrative: '',
+      meals: {
+        breakfast: !!sourceDay.meals?.breakfast,
+        lunch: !!sourceDay.meals?.lunch,
+        dinner: !!sourceDay.meals?.dinner,
+        notes: '',
+      },
+      hotel: result.snapshot,
+      roomType: result.roomType,
+      activities: [],
+      transport: null,
+      images: [],
+      dayCost: result.snapshot.ratePerNightInQuoteCurrency || result.snapshot.ratePerNight || 0,
+    };
+    days.splice(newDayIndex, 0, newDay);
+    days.forEach((d, i) => d.dayNumber = i + 1);
+    setQuote({ ...quote, days });
+    setExpandedDay(newDayIndex);
+    if (!result.error) toast.success('Added another night at the same hotel');
+  };
+
+  // Add an activity to a day. Server prices in the activity's source currency
+  // and converts to quote currency using org FX overrides — we snapshot both
+  // so dayCost stays correct when activities and hotels are in different
+  // currencies. Server also returns constraint warnings (minAge/maxGroupSize)
+  // which we surface as toasts.
+  const addActivityToDay = async (dayIndex, activity) => {
+    const day = quote.days[dayIndex];
+
+    // Display + constraint fields from the partner doc — capture even when
+    // pricing fails so the operator still sees rich content on the day card.
+    const baseSnapshot = {
       activityId: activity._id,
       name: activity.name,
+      description: activity.description,
       costPerPerson: activity.costPerPerson,
       groupRate: activity.groupRate,
-      totalCost,
-      isOptional: false,
-      description: activity.description,
+      pricingModel: activity.pricingModel || 'per_person',
+      images: activity.images || [],
+      duration: activity.duration || 0,
+      destination: activity.destination || '',
+      minimumAge: activity.minimumAge || 0,
+      maxGroupSize: activity.maxGroupSize || 0,
+      season: activity.season || 'all',
+      tags: activity.tags || [],
+      commissionRate: activity.commissionRate || 0,
+      notes: activity.notes || '',
+      isOptional: !!activity.isOptional,
     };
-    updateDay(dayIndex, { activities: [...(day.activities || []), newAct] });
+
+    try {
+      const { data } = await api.post(`/partners/activities/${activity._id}/price`, {
+        adults: quote.travelers.adults,
+        children: quote.travelers.children,
+        childAges: quote.travelers.childAges || [],
+        quoteCurrency: quote.pricing.currency,
+      });
+
+      const newAct = {
+        ...baseSnapshot,
+        sourceCurrency: data.sourceCurrency,
+        fxRate: data.fxRate,
+        totalCost: data.totalCost,
+        totalCostInQuoteCurrency: data.totalCostInQuoteCurrency,
+        warnings: data.warnings || [],
+      };
+      updateDay(dayIndex, { activities: [...(day.activities || []), newAct] });
+      if (data.warnings?.length) {
+        data.warnings.slice(0, 2).forEach(w => toast(w, { icon: '⚠️' }));
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Activity pricing failed');
+      // Fall back to a zero-cost snapshot rather than silently miscalculating.
+      const newAct = { ...baseSnapshot, totalCost: 0, totalCostInQuoteCurrency: 0 };
+      updateDay(dayIndex, { activities: [...(day.activities || []), newAct] });
+    }
   };
 
   const removeActivityFromDay = (dayIndex, actIdx) => {
     const day = quote.days[dayIndex];
     updateDay(dayIndex, { activities: day.activities.filter((_, i) => i !== actIdx) });
+  };
+
+  // Pick a transport for a day. Server applies the pricingModel + FX. The
+  // snapshot mirrors the activity/hotel pattern so render paths and dayCost
+  // rollup pick it up automatically. Only one transport per day — picking
+  // again replaces.
+  const setTransportForDay = async (dayIndex, transport, opts = {}) => {
+    const baseSnapshot = {
+      transportId: transport._id,
+      name: transport.name,
+      type: transport.type,
+      capacity: transport.capacity,
+      pricingModel: transport.pricingModel || 'per_day',
+      routeOrZone: transport.routeOrZone || '',
+      destinations: transport.destinations || [],
+      fuelIncluded: !!transport.fuelIncluded,
+      driverIncluded: !!transport.driverIncluded,
+      images: transport.images || [],
+      notes: transport.notes || '',
+      rate: transport.rate,
+      // Optional, free-text fields the operator can edit on the day card
+      estimatedTime: opts.estimatedTime || '',
+      distanceKm: opts.distanceKm || 0,
+    };
+
+    try {
+      const { data } = await api.post(`/partners/transport/${transport._id}/price`, {
+        adults: quote.travelers.adults,
+        children: quote.travelers.children,
+        days: opts.days || 1,
+        distanceKm: opts.distanceKm || 0,
+        quoteCurrency: quote.pricing.currency,
+      });
+
+      const snapshot = {
+        ...baseSnapshot,
+        sourceCurrency: data.sourceCurrency,
+        fxRate: data.fxRate,
+        totalCost: data.totalCost,
+        totalCostInQuoteCurrency: data.totalCostInQuoteCurrency,
+        days: data.days,
+        warnings: data.warnings || [],
+      };
+      updateDay(dayIndex, { transport: snapshot });
+      if (data.warnings?.length) {
+        data.warnings.slice(0, 2).forEach(w => toast(w, { icon: '⚠️' }));
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Transport pricing failed');
+      updateDay(dayIndex, { transport: { ...baseSnapshot, totalCost: 0, totalCostInQuoteCurrency: 0 } });
+    }
+  };
+
+  const clearTransportForDay = (dayIndex) => updateDay(dayIndex, { transport: null });
+
+  // In-place edit of free-text fields on the existing transport snapshot
+  // (estimatedTime, notes). Doesn't re-call the server.
+  const updateDayTransportField = (dayIndex, field, value) => {
+    const day = quote.days[dayIndex];
+    if (!day.transport) return;
+    updateDay(dayIndex, { transport: { ...day.transport, [field]: value } });
   };
 
   // Image helpers — flexible gallery for each day
@@ -743,8 +1052,12 @@ export default function QuoteBuilderPage() {
                 currency={quote.pricing.currency}
                 marginPercent={quote.pricing.marginPercent}
                 onSelectHotel={(hotel) => selectHotelForDay(idx, hotel)}
+                onExtendStay={() => extendStayFromDay(idx)}
                 onAddActivity={(activity) => addActivityToDay(idx, activity)}
                 onRemoveActivity={(actIdx) => removeActivityFromDay(idx, actIdx)}
+                onSelectTransport={(t, opts) => setTransportForDay(idx, t, opts)}
+                onClearTransport={() => clearTransportForDay(idx)}
+                onUpdateTransportField={(field, value) => updateDayTransportField(idx, field, value)}
                 onAddImage={(image) => addImageToDay(idx, image)}
                 onRemoveImage={(imgIdx) => removeImageFromDay(idx, imgIdx)}
                 onSetHero={(imgIdx) => setHeroImageForDay(idx, imgIdx)}
@@ -942,32 +1255,16 @@ export default function QuoteBuilderPage() {
           {/* AI Tools */}
           <AIPanel quote={quote} setQuote={setQuote} destinations={destinations} />
 
-          {/* Inclusions & Exclusions */}
+          {/* Inclusions & Exclusions — quote-level operator-curated text.
+              Per-hotel rate-list inclusions/exclusions can also be folded
+              into these lists reactively via the "In trip list" toggle on
+              each day card's Accommodation section. */}
           <ListEditor
             title="Included"
             icon="✓"
             items={quote.inclusions || []}
             onChange={(items) => setQuote({ ...quote, inclusions: items })}
             color="green"
-            extraAction={
-              quote.days?.some(d => (d.hotel?.inclusions || []).length > 0) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const merged = new Set(quote.inclusions || []);
-                    for (const d of quote.days || []) {
-                      for (const item of (d.hotel?.inclusions || [])) merged.add(item);
-                    }
-                    setQuote({ ...quote, inclusions: Array.from(merged) });
-                    toast.success('Merged hotel inclusions into trip inclusions');
-                  }}
-                  className="text-[11px] text-primary hover:underline"
-                  title="Pull inclusions from every hotel in the itinerary into one flat list"
-                >
-                  Merge from hotels
-                </button>
-              )
-            }
           />
           <ListEditor
             title="Excluded"
@@ -975,25 +1272,6 @@ export default function QuoteBuilderPage() {
             items={quote.exclusions || []}
             onChange={(items) => setQuote({ ...quote, exclusions: items })}
             color="sand"
-            extraAction={
-              quote.days?.some(d => (d.hotel?.exclusions || []).length > 0) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const merged = new Set(quote.exclusions || []);
-                    for (const d of quote.days || []) {
-                      for (const item of (d.hotel?.exclusions || [])) merged.add(item);
-                    }
-                    setQuote({ ...quote, exclusions: Array.from(merged) });
-                    toast.success('Merged hotel exclusions into trip exclusions');
-                  }}
-                  className="text-[11px] text-primary hover:underline"
-                  title="Pull exclusions from every hotel in the itinerary into one flat list"
-                >
-                  Merge from hotels
-                </button>
-              )
-            }
           />
 
           {/* Block Toggles — what to show on the share page */}
@@ -1529,18 +1807,92 @@ function CoverImagePicker({ coverImage, days, onChange }) {
   );
 }
 
+// Group `days` into stay-segments for line-item generation: consecutive days
+// with the same hotel + location collapse into one segment with a `nights`
+// count and the stay's activities/transport listed under it. Days with no
+// hotel become single-day segments so their activities/transport still land.
+// Three-state pill row for "where should this hotel's inclusions/exclusions
+// show on the quote?" — on the day card, merged into the trip-level list,
+// or hidden. Operator picks per hotel-day; renderer respects the choice.
+function DisplayPrefRow({ label, count, value, onChange }) {
+  const opts = [
+    { v: 'day', t: 'On day card' },
+    { v: 'merged', t: 'In trip list' },
+    { v: 'hidden', t: 'Hide' },
+  ];
+  return (
+    <div className="flex items-center justify-between gap-2 flex-wrap">
+      <span className="text-[11px] text-muted-foreground">
+        {label} <span className="text-muted-foreground/60">({count})</span>
+      </span>
+      <div className="flex gap-0.5">
+        {opts.map(o => (
+          <button
+            key={o.v}
+            onClick={() => onChange(o.v)}
+            className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
+              value === o.v
+                ? 'bg-primary text-white'
+                : 'bg-muted text-muted-foreground hover:bg-muted/70'
+            }`}
+          >
+            {o.t}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function aggregateDaysIntoSegments(days) {
+  const segments = [];
+  let current = null;
+  const keyOf = (d) => {
+    if (!d.hotel) return null;
+    return `${d.hotel.hotelId || d.hotel.name || ''}|${d.location || ''}`;
+  };
+  for (const day of (days || [])) {
+    const key = keyOf(day);
+    if (current && key !== null && key === current.key) {
+      current.nights++;
+      current.activities.push(...(day.activities || []));
+      // Keep the first day's transport; if this day adds one, append it too.
+      if (day.transport?.name) current.extraTransport.push(day.transport);
+    } else {
+      if (current) segments.push(current);
+      current = {
+        key,
+        location: day.location,
+        destination: day.location,
+        hotel: day.hotel || null,
+        nights: day.hotel ? 1 : 0,
+        activities: [...(day.activities || [])],
+        transport: day.transport || null,
+        extraTransport: [],
+      };
+    }
+  }
+  if (current) segments.push(current);
+  return segments;
+}
+
 function LineItemsEditor({ lineItems, onChange, segments, marginPercent, currency }) {
   const [editIdx, setEditIdx] = useState(null);
   const [collapsed, setCollapsed] = useState(lineItems.length > 0);
 
+  // `segments` here is actually `quote.days` (one entry per night). Aggregate
+  // them first so a 5-night Mara stay generates ONE line item with quantity 5
+  // instead of five single-night items. Pass-through fees scale by nights too,
+  // since the snapshot stores one night's worth (price-stay is called per day).
   const autoGenerate = () => {
     const items = [];
     const markup = 1 + (marginPercent / 100);
+    const stays = aggregateDaysIntoSegments(segments);
 
-    for (const seg of segments) {
-      // Hotel
+    for (const seg of stays) {
+      // Hotel — one consolidated row for the whole stay
       const nightly = seg.hotel?.ratePerNightInQuoteCurrency || seg.hotel?.ratePerNight || 0;
-      if (seg.hotel?.name && nightly > 0) {
+      if (seg.hotel?.name && nightly > 0 && seg.nights > 0) {
         items.push({
           description: `${seg.hotel.name} — ${seg.hotel.roomType || 'Standard'} (${seg.nights} night${seg.nights !== 1 ? 's' : ''})`,
           quantity: seg.nights,
@@ -1548,39 +1900,47 @@ function LineItemsEditor({ lineItems, onChange, segments, marginPercent, currenc
           total: Math.round(nightly * seg.nights * markup),
         });
       }
-      // Pass-through fees (Mara Reserve, community, etc.) — always their
-      // own line. Shown at cost (markup=1) since they're pass-through.
+      // Pass-through fees — snapshot is per-night, scale by stay length.
+      // No markup (pass-through), no roll-up across hotels (fees can differ).
       for (const fee of (seg.hotel?.passThroughFees || [])) {
-        if ((fee.amountInQuoteCurrency || 0) > 0 && fee.mandatory !== false) {
+        const perNight = fee.amountInQuoteCurrency || 0;
+        if (perNight > 0 && fee.mandatory !== false && seg.nights > 0) {
           items.push({
             description: `${fee.name}${seg.destination ? ' — ' + seg.destination : ''}`,
-            quantity: 1,
-            unitPrice: Math.round(fee.amountInQuoteCurrency),
-            total: Math.round(fee.amountInQuoteCurrency),
+            quantity: seg.nights,
+            unitPrice: Math.round(perNight),
+            total: Math.round(perNight * seg.nights),
           });
         }
       }
 
-      // Activities
+      // Activities — one line per activity instance (per day they're added).
+      // Use the FX-converted total when present.
       for (const act of (seg.activities || [])) {
-        if (act.totalCost > 0) {
+        const cost = act.totalCostInQuoteCurrency ?? act.totalCost ?? 0;
+        if (cost > 0) {
           items.push({
             description: `${act.name}${seg.destination ? ' — ' + seg.destination : ''}`,
             quantity: 1,
-            unitPrice: Math.round(act.totalCost * markup),
-            total: Math.round(act.totalCost * markup),
+            unitPrice: Math.round(cost * markup),
+            total: Math.round(cost * markup),
           });
         }
       }
 
-      // Transport
-      if (seg.transport?.name && seg.transport.totalCost > 0) {
-        items.push({
-          description: `${seg.transport.name}${seg.transport.type ? ' (' + seg.transport.type + ')' : ''}`,
-          quantity: 1,
-          unitPrice: Math.round(seg.transport.totalCost * markup),
-          total: Math.round(seg.transport.totalCost * markup),
-        });
+      // Transport — first day's transport for the segment, plus any extras
+      // tagged on later days within the same stay.
+      const transports = [seg.transport, ...seg.extraTransport].filter(t => t?.name);
+      for (const t of transports) {
+        const cost = t.totalCostInQuoteCurrency ?? t.totalCost ?? 0;
+        if (cost > 0) {
+          items.push({
+            description: `${t.name}${t.type ? ' (' + t.type + ')' : ''}`,
+            quantity: 1,
+            unitPrice: Math.round(cost * markup),
+            total: Math.round(cost * markup),
+          });
+        }
       }
     }
 
@@ -1717,11 +2077,16 @@ function DayCard({
   day, index, isExpanded, onToggle, onUpdate, onRemove, onMoveUp, onMoveDown,
   onDuplicate, onAddAfter, isFirst, isLast,
   hotels, activities, transport, destinations, currency, marginPercent,
-  onSelectHotel, onAddActivity, onRemoveActivity,
+  onSelectHotel, onExtendStay, onAddActivity, onRemoveActivity,
+  onSelectTransport, onClearTransport, onUpdateTransportField,
   onAddImage, onRemoveImage, onSetHero,
 }) {
   const [showHotelPicker, setShowHotelPicker] = useState(false);
   const [showActivityPicker, setShowActivityPicker] = useState(false);
+  const [showTransportPicker, setShowTransportPicker] = useState(false);
+  // Per-km vehicles need a distance before they can be priced; this captures
+  // the operator's input per-row in the picker without lifting state higher.
+  const [transportKmInputs, setTransportKmInputs] = useState({});
   const [showImagePicker, setShowImagePicker] = useState(false);
 
   // When a day expands, any other expanded day collapses above it — which
@@ -1742,6 +2107,14 @@ function DayCard({
 
   const matchedHotels = hotels.filter(h => !day.location || h.destination?.toLowerCase().includes(day.location.toLowerCase()));
   const matchedActivities = activities.filter(a => !day.location || a.destination?.toLowerCase().includes(day.location.toLowerCase()));
+  // Transport: filter by matching destination if any are tagged on the
+  // partner doc, otherwise show all (vehicles are often used trip-wide).
+  const matchedTransport = (transport || []).filter(t => {
+    if (!day.location) return true;
+    const dests = t.destinations || [];
+    if (!dests.length) return true;
+    return dests.some(d => d.toLowerCase().includes(day.location.toLowerCase()) || day.location.toLowerCase().includes(d.toLowerCase()));
+  });
 
   const heroImage = day.images?.[0];
 
@@ -1894,24 +2267,42 @@ function DayCard({
                 {day.hotel && <button onClick={() => onUpdate({ hotel: null, roomType: '' })} className="text-[10px] text-red-400 hover:underline">Clear</button>}
               </div>
               {day.hotel?.name ? (
-                <div className="flex items-center gap-3 p-2.5 rounded-lg bg-background border border-border">
-                  {day.hotel.images?.[0]?.url && <img src={day.hotel.images[0].url} alt="" className="w-12 h-12 rounded-md object-cover" />}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">{day.hotel.name}</p>
-                    <p className="text-[10px] text-muted-foreground truncate">
-                      {day.hotel.roomType || '—'}
-                      {day.hotel.mealPlan && ` · ${day.hotel.mealPlan}`}
-                      {day.hotel.seasonLabel && ` · ${day.hotel.seasonLabel}`}
-                      {` · ${formatCurrency(day.hotel.ratePerNightInQuoteCurrency || day.hotel.ratePerNight, currency)}/night`}
-                    </p>
-                    {day.hotel.rateListName && (
-                      <p className="text-[10px] text-muted-foreground/70 truncate">
-                        {day.hotel.rateListName} ({(day.hotel.audienceApplied || []).join(', ')})
+                <>
+                  <div className="flex items-center gap-3 p-2.5 rounded-lg bg-background border border-border">
+                    {day.hotel.images?.[0]?.url && <img src={day.hotel.images[0].url} alt="" className="w-12 h-12 rounded-md object-cover" />}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{day.hotel.name}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        {day.hotel.roomType || '—'}
+                        {day.hotel.mealPlan && ` · ${day.hotel.mealPlan}`}
+                        {day.hotel.seasonLabel && ` · ${day.hotel.seasonLabel}`}
+                        {` · ${formatCurrency(day.hotel.ratePerNightInQuoteCurrency || day.hotel.ratePerNight, currency)}/night`}
                       </p>
-                    )}
+                      {day.hotel.rateListName && (
+                        <p className="text-[10px] text-muted-foreground/70 truncate">
+                          {day.hotel.rateListName} ({(day.hotel.audienceApplied || []).join(', ')})
+                        </p>
+                      )}
+                      {day.hotel.mandatoryAddOnsPerNightTotal > 0 && (
+                        <p className="text-[10px] text-muted-foreground/70 truncate" title={(day.hotel.mandatoryAddOnsPerNight || []).map(m => m.name).join(', ')}>
+                          Includes mandatory: {formatCurrency((day.hotel.mandatoryAddOnsPerNightTotal || 0) * (day.hotel.fxRate || 1), currency)}/night
+                          {day.hotel.mandatoryAddOnsPerNight?.length ? ` (${day.hotel.mandatoryAddOnsPerNight.map(m => m.name).join(', ')})` : ''}
+                        </p>
+                      )}
+                    </div>
+                    <button onClick={() => setShowHotelPicker(true)} className="text-[10px] text-primary hover:underline">Change</button>
                   </div>
-                  <button onClick={() => setShowHotelPicker(true)} className="text-[10px] text-primary hover:underline">Change</button>
-                </div>
+                  {/* Convenience: another night at the same hotel. Re-prices for the
+                      next date so seasonal/stay-tier shifts are honoured (we don't
+                      copy this snapshot's rate forward — that would be silently wrong). */}
+                  <button
+                    onClick={onExtendStay}
+                    className="mt-1.5 w-full p-1.5 rounded-md border border-dashed border-border text-[10px] text-muted-foreground hover:border-primary hover:text-primary transition-colors"
+                    title="Insert a new day after this one with the same hotel, re-priced for that night's date"
+                  >
+                    <Plus className="w-3 h-3 inline mr-0.5" /> Add another night here
+                  </button>
+                </>
               ) : (
                 <button onClick={() => setShowHotelPicker(true)} className="w-full p-2.5 rounded-lg border border-dashed border-border text-xs text-muted-foreground hover:border-primary hover:text-primary">
                   <Hotel className="w-3.5 h-3.5 inline mr-1" /> Select hotel
@@ -1954,6 +2345,30 @@ function DayCard({
                   <button onClick={() => setShowHotelPicker(false)} className="text-[10px] text-muted-foreground/70 hover:underline w-full text-right pt-1">Close</button>
                 </div>
               )}
+
+              {/* Per-hotel preference for where the rate-list inclusions and
+                  exclusions appear on the quote: on this day's card, merged
+                  into the trip-level Included/Excluded list, or hidden. */}
+              {day.hotel?.name && ((day.hotel.inclusions?.length || 0) > 0 || (day.hotel.exclusions?.length || 0) > 0) && (
+                <div className="mt-2 p-2.5 rounded-lg bg-background border border-border space-y-2">
+                  {(day.hotel.inclusions?.length || 0) > 0 && (
+                    <DisplayPrefRow
+                      label="Inclusions"
+                      count={day.hotel.inclusions.length}
+                      value={day.hotel.inclusionsDisplay || 'day'}
+                      onChange={(v) => onUpdate({ hotel: { ...day.hotel, inclusionsDisplay: v } })}
+                    />
+                  )}
+                  {(day.hotel.exclusions?.length || 0) > 0 && (
+                    <DisplayPrefRow
+                      label="Exclusions"
+                      count={day.hotel.exclusions.length}
+                      value={day.hotel.exclusionsDisplay || 'day'}
+                      onChange={(v) => onUpdate({ hotel: { ...day.hotel, exclusionsDisplay: v } })}
+                    />
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Activities */}
@@ -1961,37 +2376,189 @@ function DayCard({
               <label className="block text-xs font-medium text-muted-foreground mb-1">Activities</label>
               {day.activities?.length > 0 && (
                 <div className="space-y-1 mb-2">
-                  {day.activities.map((a, i) => (
-                    <div key={i} className="flex items-center justify-between p-2 rounded bg-background border border-border">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Ticket className="w-3 h-3 text-muted-foreground/70 flex-shrink-0" />
-                        <span className="text-xs text-foreground truncate">{a.name}</span>
+                  {day.activities.map((a, i) => {
+                    const dur = formatDuration(a.duration);
+                    const hasWarning = a.warnings?.length > 0;
+                    const totalDisplay = a.totalCostInQuoteCurrency ?? a.totalCost ?? 0;
+                    return (
+                      <div key={i} className="flex items-center justify-between p-2 rounded bg-background border border-border">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {a.images?.[0]?.url ? (
+                            <img src={cldThumb(a.images[0].url, 60)} alt="" className="w-6 h-6 rounded object-cover flex-shrink-0" />
+                          ) : (
+                            <Ticket className="w-3 h-3 text-muted-foreground/70 flex-shrink-0" />
+                          )}
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs text-foreground truncate">{a.name}</span>
+                              {hasWarning && (
+                                <span title={a.warnings.join('\n')}>
+                                  <AlertTriangle className="w-3 h-3 text-amber-500 flex-shrink-0" />
+                                </span>
+                              )}
+                            </div>
+                            {dur && (
+                              <p className="text-[10px] text-muted-foreground/70 flex items-center gap-0.5">
+                                <Clock className="w-2.5 h-2.5" /> {dur}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className="text-[10px] text-muted-foreground">{formatCurrency(totalDisplay, currency)}</span>
+                          <button onClick={() => onRemoveActivity(i)} className="text-muted-foreground/70 hover:text-red-500">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <span className="text-[10px] text-muted-foreground">{formatCurrency(a.totalCost, currency)}</span>
-                        <button onClick={() => onRemoveActivity(i)} className="text-muted-foreground/70 hover:text-red-500">
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
               <button onClick={() => setShowActivityPicker(!showActivityPicker)} className="w-full p-2 rounded-lg border border-dashed border-border text-xs text-muted-foreground hover:border-primary hover:text-primary">
                 <Plus className="w-3 h-3 inline mr-0.5" /> Add activity
               </button>
               {showActivityPicker && (
-                <div className="mt-2 p-3 rounded-lg bg-background border border-border max-h-48 overflow-y-auto space-y-1">
+                <div className="mt-2 p-3 rounded-lg bg-background border border-border max-h-64 overflow-y-auto space-y-1">
                   {matchedActivities.length === 0 ? (
                     <p className="text-xs text-muted-foreground/70 text-center py-2">No activities for this location.</p>
-                  ) : matchedActivities.map(a => (
-                    <button key={a._id} onClick={() => { onAddActivity(a); }}
-                      className="w-full text-left p-2 rounded bg-card hover:bg-primary/10 border border-border transition-colors">
-                      <p className="text-xs font-medium text-foreground">{a.name}</p>
-                      <p className="text-[10px] text-muted-foreground">{formatCurrency(a.costPerPerson || a.groupRate || 0, currency)} {a.pricingModel === 'per_person' ? '/person' : '/group'}</p>
-                    </button>
-                  ))}
+                  ) : matchedActivities.map(a => {
+                    const dur = formatDuration(a.duration);
+                    return (
+                      <button key={a._id} onClick={() => { onAddActivity(a); }}
+                        className="w-full text-left p-2 rounded bg-card hover:bg-primary/10 border border-border transition-colors">
+                        <div className="flex items-start gap-2">
+                          {a.images?.[0]?.url && (
+                            <img src={cldThumb(a.images[0].url, 80)} alt="" className="w-8 h-8 rounded object-cover flex-shrink-0 mt-0.5" />
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-medium text-foreground truncate">{a.name}</p>
+                            <p className="text-[10px] text-muted-foreground">
+                              {formatCurrency(a.costPerPerson || a.groupRate || 0, currency)} {a.pricingModel === 'per_person' ? '/person' : '/group'}
+                              {dur && <> · <Clock className="w-2.5 h-2.5 inline mb-0.5" /> {dur}</>}
+                              {a.minimumAge > 0 && <> · {a.minimumAge}+ yrs</>}
+                              {a.maxGroupSize > 0 && <> · max {a.maxGroupSize}</>}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
                   <button onClick={() => setShowActivityPicker(false)} className="text-[10px] text-muted-foreground/70 hover:underline w-full text-right pt-1">Close</button>
+                </div>
+              )}
+            </div>
+
+            {/* Transport */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-medium text-muted-foreground">Transport</label>
+                {day.transport && <button onClick={onClearTransport} className="text-[10px] text-red-400 hover:underline">Clear</button>}
+              </div>
+              {day.transport?.name ? (
+                <div className="p-2.5 rounded-lg bg-background border border-border space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground truncate flex items-center gap-1.5">
+                        <Truck className="w-3.5 h-3.5 text-muted-foreground/70 flex-shrink-0" />
+                        {day.transport.name}
+                        {day.transport.warnings?.length > 0 && (
+                          <span title={day.transport.warnings.join('\n')}>
+                            <AlertTriangle className="w-3 h-3 text-amber-500" />
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        {day.transport.type && <span className="capitalize">{String(day.transport.type).replace(/_/g, ' ')}</span>}
+                        {day.transport.capacity > 0 && <> · cap {day.transport.capacity}</>}
+                        {day.transport.routeOrZone && <> · {day.transport.routeOrZone}</>}
+                      </p>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {day.transport.fuelIncluded && <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">Fuel</span>}
+                        {day.transport.driverIncluded && <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">Driver</span>}
+                        {day.transport.distanceKm > 0 && <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{day.transport.distanceKm} km</span>}
+                      </div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-xs font-semibold text-foreground">
+                        {formatCurrency(day.transport.totalCostInQuoteCurrency ?? day.transport.totalCost ?? 0, currency)}
+                      </p>
+                      <p className="text-[9px] text-muted-foreground/70">{String(day.transport.pricingModel || '').replace(/_/g, ' ')}</p>
+                    </div>
+                  </div>
+                  <input
+                    type="text"
+                    value={day.transport.estimatedTime || ''}
+                    onChange={e => onUpdateTransportField('estimatedTime', e.target.value)}
+                    placeholder="Transfer time (optional, e.g. '4 hrs', '1 hr 30 min')"
+                    className="w-full px-2 py-1 rounded bg-card border border-border text-[11px] focus:outline-none focus:border-primary"
+                  />
+                </div>
+              ) : (
+                <button onClick={() => setShowTransportPicker(!showTransportPicker)} className="w-full p-2 rounded-lg border border-dashed border-border text-xs text-muted-foreground hover:border-primary hover:text-primary">
+                  <Truck className="w-3 h-3 inline mr-1" /> Add transport
+                </button>
+              )}
+              {showTransportPicker && !day.transport && (
+                <div className="mt-2 p-3 rounded-lg bg-background border border-border max-h-72 overflow-y-auto space-y-1.5">
+                  {matchedTransport.length === 0 ? (
+                    <p className="text-xs text-muted-foreground/70 text-center py-2">No transport for this location. Add some in Partners.</p>
+                  ) : matchedTransport.map(t => {
+                    const isPerKm = t.pricingModel === 'per_km';
+                    const km = transportKmInputs[t._id] || '';
+                    return (
+                      <div key={t._id} className="bg-card rounded p-2 border border-border">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-medium text-foreground truncate">{t.name}</p>
+                            <p className="text-[10px] text-muted-foreground">
+                              <span className="capitalize">{String(t.type || '').replace(/_/g, ' ')}</span>
+                              {t.capacity > 0 && ` · cap ${t.capacity}`}
+                              {' · '}
+                              {formatCurrency(t.rate || 0, currency)} {String(t.pricingModel || '').replace(/_/g, ' ')}
+                            </p>
+                            {t.routeOrZone && (
+                              <p className="text-[10px] text-muted-foreground/70 mt-0.5">{t.routeOrZone}</p>
+                            )}
+                          </div>
+                          {isPerKm ? (
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <input
+                                type="number"
+                                min="0"
+                                value={km}
+                                onChange={e => setTransportKmInputs({ ...transportKmInputs, [t._id]: e.target.value })}
+                                placeholder="km"
+                                className="w-14 px-1.5 py-0.5 rounded bg-background border border-border text-[10px] focus:outline-none focus:border-primary"
+                              />
+                              <button
+                                onClick={() => {
+                                  const distanceKm = parseFloat(km);
+                                  if (!distanceKm || distanceKm <= 0) {
+                                    toast.error('Enter distance in km');
+                                    return;
+                                  }
+                                  onSelectTransport(t, { distanceKm });
+                                  setShowTransportPicker(false);
+                                }}
+                                className="text-[10px] px-2 py-0.5 rounded bg-primary text-white hover:opacity-90"
+                              >
+                                Add
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => { onSelectTransport(t); setShowTransportPicker(false); }}
+                              className="text-[10px] px-2 py-0.5 rounded bg-primary text-white hover:opacity-90 flex-shrink-0"
+                            >
+                              Select
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <button onClick={() => setShowTransportPicker(false)} className="text-[10px] text-muted-foreground/70 hover:underline w-full text-right pt-1">Close</button>
                 </div>
               )}
             </div>
@@ -2365,28 +2932,46 @@ const BLOCK_INFO = {
   day_by_day: { label: 'Day by Day', description: 'Detailed day-by-day breakdown' },
   map: { label: 'Route Map', description: 'Interactive map of the route' },
   accommodations: { label: 'Accommodations', description: 'Hotel cards with photos' },
+  optional_extras: { label: 'Optional Extras', description: 'Add-ons available at the lodges' },
   pricing: { label: 'Pricing', description: 'Total price and per-person breakdown' },
   inclusions: { label: 'Inclusions', description: "What's included in the price" },
   exclusions: { label: 'Exclusions', description: "What's not included" },
-  payment_terms: { label: 'Payment Terms', description: 'Deposit and balance schedule' },
+  payment_terms: { label: 'Payment & Booking Terms', description: 'Deposit, cancellation, payment schedule' },
   about_us: { label: 'About Us', description: 'Your company story (off by default)' },
   terms: { label: 'Terms & Conditions', description: 'Legal terms (off by default)' },
 };
 
-function BlockToggles({ blocks = [], onChange }) {
-  const sorted = [...blocks].sort((a, b) => a.order - b.order);
+// Defaults for any block IDs that newer schemas added but an existing quote
+// doesn't yet have in its persisted blocks array. Keeps the toggle UI in sync
+// with the renderer (which defaults missing IDs to enabled=true).
+const BLOCK_DEFAULTS = {
+  optional_extras: { enabled: true, order: 5 },
+};
 
+function BlockToggles({ blocks = [], onChange }) {
+  // Backfill any block IDs the schema knows about but that aren't in this
+  // quote's saved array (older quotes saved before the ID existed).
+  const present = new Set(blocks.map(b => b.id));
+  const knownIds = Object.keys(BLOCK_INFO);
+  const missing = knownIds
+    .filter(id => !present.has(id) && BLOCK_DEFAULTS[id])
+    .map(id => ({ id, ...BLOCK_DEFAULTS[id] }));
+  const fullList = [...blocks, ...missing];
+  const sorted = [...fullList].sort((a, b) => a.order - b.order);
+
+  // Operate on the backfilled list so newly-added schema blocks behave like
+  // any other toggle. Persists the (possibly) larger array back via onChange.
   const toggle = (id) => {
-    onChange(blocks.map(b => b.id === id ? { ...b, enabled: !b.enabled } : b));
+    onChange(fullList.map(b => b.id === id ? { ...b, enabled: !b.enabled } : b));
   };
 
   const move = (idx, dir) => {
-    const sorted = [...blocks].sort((a, b) => a.order - b.order);
+    const reordered = [...sorted];
     const newIdx = idx + dir;
-    if (newIdx < 0 || newIdx >= sorted.length) return;
-    [sorted[idx], sorted[newIdx]] = [sorted[newIdx], sorted[idx]];
-    sorted.forEach((b, i) => b.order = i);
-    onChange(sorted);
+    if (newIdx < 0 || newIdx >= reordered.length) return;
+    [reordered[idx], reordered[newIdx]] = [reordered[newIdx], reordered[idx]];
+    reordered.forEach((b, i) => b.order = i);
+    onChange(reordered);
   };
 
   return (

@@ -1,6 +1,36 @@
 import { useState, useEffect, useRef } from 'react';
 import { mealPlanLabels } from '../../utils/helpers';
 
+const HOTEL_TYPE_LABELS = {
+  hotel: 'Hotel',
+  lodge: 'Lodge',
+  tented_camp: 'Tented Camp',
+  resort: 'Resort',
+  villa: 'Villa',
+  apartment: 'Apartment',
+  guesthouse: 'Guesthouse',
+  conservancy_camp: 'Conservancy Camp',
+};
+const formatHotelType = (t) => HOTEL_TYPE_LABELS[t] || (t ? t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '');
+
+// Render N filled + (5-N) empty stars in the brand color. Returns null if no
+// rating set so callers can short-circuit.
+function StarRating({ stars, color, size = 12 }) {
+  if (!stars) return null;
+  return (
+    <div className="flex items-center gap-0.5">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <Star
+          key={i}
+          size={size}
+          fill={i < stars ? color : 'transparent'}
+          style={{ color: i < stars ? color : '#d6d3d1' }}
+        />
+      ))}
+    </div>
+  );
+}
+
 const COUNTRY_LOCALE = {
   'Kenya': 'en-KE', 'Tanzania': 'en-TZ', 'Uganda': 'en-UG',
   'United Kingdom': 'en-GB', 'UK': 'en-GB', 'Ireland': 'en-IE',
@@ -22,8 +52,19 @@ const makeFormatters = (locale) => ({
 import {
   MapPin, Calendar, Users as UsersIcon, Clock, ChevronDown,
   Sun, Sunrise, Sunset, Moon, Coffee, Star, Phone, Mail,
-  Globe, CheckCircle, XCircle, ExternalLink,
+  Globe, CheckCircle, XCircle, ExternalLink, Timer,
 } from 'lucide-react';
+
+// Format an activity duration (hours, possibly fractional) into a short label.
+const formatDuration = (h) => {
+  const n = Number(h) || 0;
+  if (n <= 0) return '';
+  if (n < 1) return `${Math.round(n * 60)} min`;
+  if (n === 1) return '1 hr';
+  if (n < 24) return `${n % 1 === 0 ? n : n.toFixed(1)} hrs`;
+  const d = n / 24;
+  return `${d % 1 === 0 ? d : d.toFixed(1)} day${d >= 2 ? 's' : ''}`;
+};
 
 const timeIcons = {
   early_morning: Sunrise,
@@ -76,6 +117,127 @@ const STYLE_PRESETS = {
     photoFrame: { padding: '8px', background: '#fff', border: '1px solid #e7e5e4' },
   },
 };
+
+// Walk consecutive same-hotel days and emit one record per stay so we can
+// scale per-night fees correctly without N+1ing on snapshot duplicates.
+function eachStaySegment(days) {
+  const out = [];
+  let cur = null;
+  const keyOf = (d) => d.hotel ? `${d.hotel.hotelId || d.hotel.name}` : null;
+  for (const d of (days || [])) {
+    const k = keyOf(d);
+    if (cur && k !== null && k === cur.key) cur.nights++;
+    else {
+      if (cur) out.push(cur);
+      cur = { key: k, hotel: d.hotel || null, nights: d.hotel ? 1 : 0 };
+    }
+  }
+  if (cur) out.push(cur);
+  return out.filter(s => s.hotel?.name && s.nights > 0);
+}
+
+// Aggregate pass-through fees across the trip into one row per (hotel, fee
+// name). Fees with per-night units are scaled by the stay's night count;
+// one-shot units (per_entry, flat) are taken as-is. Returns rows in quote
+// currency, suitable for direct rendering.
+function collectFees(days) {
+  const rows = [];
+  for (const seg of eachStaySegment(days)) {
+    for (const fee of (seg.hotel.passThroughFees || [])) {
+      if (!(fee.amountInQuoteCurrency > 0)) continue;
+      const perNight = ['per_person_per_day', 'per_person_per_night', 'per_room_per_night'].includes(fee.unit);
+      const amount = perNight ? fee.amountInQuoteCurrency * seg.nights : fee.amountInQuoteCurrency;
+      rows.push({
+        name: fee.name,
+        source: seg.hotel.name,
+        unit: fee.unit,
+        nights: seg.nights,
+        amount,
+        mandatory: fee.mandatory !== false,
+        notes: fee.notes || '',
+      });
+    }
+  }
+  return rows;
+}
+
+// Pull deposit + cancellation tiers + booking terms from the package (when
+// the quote was built from one) and from each unique hotel snapshot. Deposit
+// returns the highest % across sources (worst case for the client). Tiers
+// dedupe by (daysBefore, penaltyPct). Booking terms collected per source.
+function collectPolicy(quote) {
+  let depositPct = 0;
+  const tierMap = new Map();
+  const bookingTerms = [];
+
+  const ingest = (source, name) => {
+    if (!source) return;
+    if ((source.depositPct || 0) > depositPct) depositPct = source.depositPct;
+    for (const t of (source.cancellationTiers || [])) {
+      const key = `${t.daysBefore}|${t.penaltyPct}`;
+      if (!tierMap.has(key)) tierMap.set(key, { ...t, sources: [name] });
+      else if (!tierMap.get(key).sources.includes(name)) tierMap.get(key).sources.push(name);
+    }
+    if (source.bookingTerms) bookingTerms.push({ text: source.bookingTerms, source: name });
+  };
+
+  if (quote.packageSnapshot) ingest(quote.packageSnapshot, quote.packageSnapshot.name || 'Package');
+
+  const seenHotels = new Set();
+  for (const d of (quote.days || [])) {
+    const h = d.hotel;
+    if (!h?.name || seenHotels.has(h.name)) continue;
+    seenHotels.add(h.name);
+    ingest(h, h.name);
+  }
+
+  // Sort tiers by daysBefore descending — least restrictive first.
+  const cancellationTiers = Array.from(tierMap.values()).sort((a, b) => (b.daysBefore || 0) - (a.daysBefore || 0));
+  return { depositPct, cancellationTiers, bookingTerms };
+}
+
+// Format an add-on unit code into a human label.
+const ADDON_UNIT_LABELS = {
+  per_person_per_day: '/ person / day',
+  per_day: '/ day',
+  per_trip: '/ trip',
+  per_person: '/ person',
+  per_room_per_day: '/ room / day',
+  per_vehicle: '/ vehicle',
+};
+const formatAddOnUnit = (u) => ADDON_UNIT_LABELS[u] || (u ? `/ ${String(u).replace(/_/g, ' ')}` : '');
+
+// Walk every unique hotel stay and collect optional add-ons (drinks, massages,
+// balloon rides, etc.). Grouped by hotel so the share-page renderer can show
+// "available at this lodge" sub-sections rather than a flat soup. Mandatory
+// add-ons are excluded — those belong in line items, not the showcase.
+function collectAddOns(days) {
+  const byHotel = new Map();
+  const seenStays = new Set();
+  for (const d of (days || [])) {
+    const h = d.hotel;
+    if (!h?.name) continue;
+    const stayKey = `${h.hotelId || h.name}`;
+    if (seenStays.has(stayKey)) continue;
+    seenStays.add(stayKey);
+    const optional = (h.addOns || []).filter(a => a.optional !== false);
+    if (!optional.length) continue;
+    byHotel.set(h.name, optional);
+  }
+  return Array.from(byHotel.entries()).map(([hotelName, addOns]) => ({ hotelName, addOns }));
+}
+
+// Format a supplement entry (rate-list source currency) into a quote-currency
+// label, e.g. "Christmas surcharge: +$40 per person". Returns '' when the
+// supplement carries no payable amount.
+function formatSupplement(s, hotel, formatCurrency, quoteCurrency) {
+  const fx = hotel?.fxRate || 1;
+  const native = Number(s.nativeAmount) || 0;
+  const inQuote = (Number(s.amount) || 0) * fx;
+  if (inQuote <= 0 && native <= 0) return '';
+  const amt = inQuote > 0 ? formatCurrency(inQuote, quoteCurrency) : formatCurrency(native, s.nativeCurrency || quoteCurrency);
+  return `${s.name}: +${amt}`;
+}
 
 export default function QuoteRenderer({ quote, token, previewMode = false }) {
   const [activeDay, setActiveDay] = useState(0);
@@ -160,7 +322,13 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
       title: d.title,
       destination: d.location,
       hotel: d.hotel,
-      activities: (d.activities || []).map(a => ({ timeOfDay: a.timeOfDay || 'morning', description: a.name })),
+      activities: (d.activities || []).map(a => ({
+        timeOfDay: a.timeOfDay || 'morning',
+        name: a.name,
+        description: a.description || '',
+        duration: a.duration || 0,
+        image: a.images?.[0] || null,
+      })),
       mealPlan: d.hotel?.mealPlan,
       meals: d.meals,
       narrative: d.narrative,
@@ -207,6 +375,46 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
       uniqueHotels.push(d.hotel);
     }
   }
+
+  // Merge per-hotel rate-list inclusions/exclusions into the trip-level lists
+  // when the operator chose "In trip list" on that day card. Items carry the
+  // hotel name as attribution so the client knows which stay each line refers
+  // to. Dedupe keeps quote-level items (operator-curated) at the top and
+  // suppresses an exact duplicate from a hotel.
+  const buildMergedList = (kind /* 'inclusions' | 'exclusions' */, prefKey /* 'inclusionsDisplay' | 'exclusionsDisplay' */) => {
+    const baseList = (quote[kind] || []).map(text => ({ text, source: null }));
+    const baseSet = new Set(baseList.map(b => b.text));
+    const merged = [];
+    const mergedSeen = new Set();
+    const seenStays = new Set();
+    for (const d of (quote.days || [])) {
+      const h = d.hotel;
+      if (!h?.name) continue;
+      // Render each hotel's items only once per stay-key, so a 5-night Mara
+      // run doesn't repeat the same lines five times.
+      const stayKey = `${h.hotelId || h.name}`;
+      if (seenStays.has(stayKey)) continue;
+      seenStays.add(stayKey);
+      const pref = h[prefKey] || 'day';
+      if (pref !== 'merged') continue;
+      for (const item of (h[kind] || [])) {
+        const key = `${item}::${h.name}`;
+        if (baseSet.has(item) || mergedSeen.has(key)) continue;
+        mergedSeen.add(key);
+        merged.push({ text: item, source: h.name });
+      }
+    }
+    return [...baseList, ...merged];
+  };
+  const mergedInclusions = buildMergedList('inclusions', 'inclusionsDisplay');
+  const mergedExclusions = buildMergedList('exclusions', 'exclusionsDisplay');
+
+  // Trip-level pass-through fees (park, community, government levies) and
+  // booking policy (deposit/cancellation/terms) — both aggregated from per-day
+  // hotel snapshots and the package snapshot when present.
+  const tripFees = collectFees(quote.days);
+  const tripPolicy = collectPolicy(quote);
+  const tripAddOns = collectAddOns(quote.days);
 
   const quickFacts = [
     { icon: Calendar, label: 'Duration', value: `${totalDays} Days / ${totalNights} Nights` },
@@ -474,10 +682,14 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                       {day.transport && (
                         <div className="flex items-center gap-2 mb-4 p-3 rounded-lg bg-white border border-stone-200">
                           <div className="w-7 h-7 rounded-md flex items-center justify-center text-white text-xs" style={{ backgroundColor: primaryColor }}>→</div>
-                          <div>
+                          <div className="min-w-0 flex-1">
                             <p className="text-xs font-semibold text-stone-700">{day.transport.name}</p>
-                            {day.transport.estimatedTime && (
-                              <p className="text-[11px] text-stone-400">Transfer time: {day.transport.estimatedTime}</p>
+                            {(day.transport.type || day.transport.estimatedTime || day.transport.distanceKm > 0) && (
+                              <p className="text-[11px] text-stone-400">
+                                {day.transport.type && <span className="capitalize">{String(day.transport.type).replace(/_/g, ' ')}</span>}
+                                {day.transport.estimatedTime && <>{day.transport.type ? ' · ' : ''}{day.transport.estimatedTime}</>}
+                                {day.transport.distanceKm > 0 && <>{(day.transport.type || day.transport.estimatedTime) ? ' · ' : ''}{day.transport.distanceKm} km</>}
+                              </p>
                             )}
                           </div>
                         </div>
@@ -485,16 +697,33 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
 
                       {/* Activities */}
                       {day.activities?.length > 0 && (
-                        <div className="space-y-2">
+                        <div className="space-y-2.5">
                           <h4 className="text-xs font-bold uppercase tracking-wider text-stone-400">Activities</h4>
                           {day.activities.map((act, ai) => {
                             const TimeIcon = timeIcons[act.timeOfDay] || Sun;
+                            const dur = formatDuration(act.duration);
                             return (
                               <div key={ai} className="flex items-start gap-2.5">
-                                <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5" style={{ backgroundColor: primaryColor + '15' }}>
-                                  <TimeIcon className="w-3 h-3" style={{ color: primaryColor }} />
+                                {act.image?.url ? (
+                                  <img src={act.image.url} alt="" className="w-10 h-10 rounded-md object-cover flex-shrink-0 mt-0.5" />
+                                ) : (
+                                  <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 mt-1" style={{ backgroundColor: primaryColor + '15' }}>
+                                    <TimeIcon className="w-3 h-3" style={{ color: primaryColor }} />
+                                  </div>
+                                )}
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-baseline gap-2 flex-wrap">
+                                    <p className="text-sm font-medium text-stone-700">{act.name}</p>
+                                    {dur && (
+                                      <span className="text-[11px] text-stone-400 inline-flex items-center gap-0.5">
+                                        <Timer className="w-3 h-3" /> {dur}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {act.description && act.description !== act.name && (
+                                    <p className="text-xs text-stone-500 mt-0.5 leading-relaxed">{act.description}</p>
+                                  )}
                                 </div>
-                                <p className="text-sm text-stone-700">{act.description}</p>
                               </div>
                             );
                           })}
@@ -508,7 +737,17 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                         <div className="bg-white rounded-xl border border-stone-200 p-4">
                           <p className="text-[10px] uppercase tracking-wider text-stone-400 font-semibold mb-1.5">Accommodation · Day {day.dayNumber}</p>
                           <h4 className="text-sm font-bold text-stone-900">{day.hotel.name}</h4>
-                          {day.hotel.roomType && <p className="text-xs text-stone-500 mt-0.5">{day.hotel.roomType}</p>}
+                          {day.hotel.stars > 0 && (
+                            <div className="mt-1"><StarRating stars={day.hotel.stars} color={primaryColor} size={11} /></div>
+                          )}
+                          {(day.hotel.type || day.hotel.location) && (
+                            <p className="text-[11px] text-stone-400 mt-1">
+                              {day.hotel.type && formatHotelType(day.hotel.type)}
+                              {day.hotel.type && day.hotel.location && ' · '}
+                              {day.hotel.location}
+                            </p>
+                          )}
+                          {day.hotel.roomType && <p className="text-xs text-stone-500 mt-1">{day.hotel.roomType}</p>}
                           {day.hotel.description && (
                             <p className="text-xs text-stone-500 mt-2 leading-relaxed line-clamp-4">{day.hotel.description}</p>
                           )}
@@ -517,7 +756,7 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                               <img src={day.hotel.images[0].url} alt={day.hotel.name} className="w-full h-28 object-cover block" />
                             </div>
                           )}
-                          {(day.hotel.inclusions?.length > 0) && (
+                          {(day.hotel.inclusions?.length > 0) && (day.hotel.inclusionsDisplay || 'day') === 'day' && (
                             <div className="mt-3 pt-3 border-t border-stone-100">
                               <p className="text-[10px] uppercase tracking-wider text-stone-400 font-semibold mb-1.5">Included at this stay</p>
                               <ul className="space-y-0.5">
@@ -526,6 +765,34 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                                     <span className="text-green-600">✓</span><span>{item}</span>
                                   </li>
                                 ))}
+                              </ul>
+                            </div>
+                          )}
+                          {(day.hotel.exclusions?.length > 0) && (day.hotel.exclusionsDisplay || 'day') === 'day' && (
+                            <div className="mt-3 pt-3 border-t border-stone-100">
+                              <p className="text-[10px] uppercase tracking-wider text-stone-400 font-semibold mb-1.5">Not included at this stay</p>
+                              <ul className="space-y-0.5">
+                                {day.hotel.exclusions.map((item, i) => (
+                                  <li key={i} className="text-[11px] text-stone-500 leading-snug flex gap-1.5">
+                                    <span className="text-stone-400">✕</span><span>{item}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          {(day.hotel.supplements?.length > 0) && (
+                            <div className="mt-3 pt-3 border-t border-stone-100">
+                              <p className="text-[10px] uppercase tracking-wider text-stone-400 font-semibold mb-1.5">Date-specific surcharges</p>
+                              <ul className="space-y-0.5">
+                                {day.hotel.supplements.map((s, i) => {
+                                  const label = formatSupplement(s, day.hotel, formatCurrency, quote.pricing?.currency);
+                                  if (!label) return null;
+                                  return (
+                                    <li key={i} className="text-[11px] text-amber-700 leading-snug flex gap-1.5">
+                                      <span className="text-amber-500">⚠</span><span>{label}{s.notes ? ` — ${s.notes}` : ''}</span>
+                                    </li>
+                                  );
+                                })}
                               </ul>
                             </div>
                           )}
@@ -568,13 +835,77 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                 )}
                 <div className="p-5">
                   <h3 className="text-base font-bold text-stone-900">{hotel.name}</h3>
-                  {hotel.roomType && <p className="text-xs text-stone-500 mt-0.5">{hotel.roomType}</p>}
+                  {hotel.stars > 0 && (
+                    <div className="mt-1.5"><StarRating stars={hotel.stars} color={primaryColor} size={13} /></div>
+                  )}
+                  {(hotel.type || hotel.location) && (
+                    <p className="text-[11px] text-stone-400 mt-1.5 flex items-center gap-1">
+                      {hotel.location && <MapPin className="w-3 h-3" />}
+                      {hotel.type && formatHotelType(hotel.type)}
+                      {hotel.type && hotel.location && ' · '}
+                      {hotel.location}
+                    </p>
+                  )}
+                  {hotel.roomType && <p className="text-xs text-stone-500 mt-2">{hotel.roomType}</p>}
                   {hotel.mealPlan && (
                     <p className="text-xs text-stone-500 mt-1">{mealPlanLabels[hotel.mealPlan] || hotel.mealPlan}</p>
                   )}
                   {hotel.description && (
                     <p className="text-sm text-stone-600 mt-3 leading-relaxed line-clamp-3">{hotel.description}</p>
                   )}
+                  {(hotel.amenities?.length > 0) && (
+                    <div className="mt-3 pt-3 border-t border-stone-100">
+                      <div className="flex flex-wrap gap-1">
+                        {hotel.amenities.slice(0, 8).map((a, ai) => (
+                          <span key={ai} className="text-[10px] px-2 py-0.5 rounded-full bg-stone-100 text-stone-600">
+                            {a}
+                          </span>
+                        ))}
+                        {hotel.amenities.length > 8 && (
+                          <span className="text-[10px] px-2 py-0.5 text-stone-400">
+                            +{hotel.amenities.length - 8}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ─── OPTIONAL EXTRAS BLOCK ──────────────────── */}
+      {blockEnabled('optional_extras') && tripAddOns.length > 0 && (
+        <section className="max-w-5xl mx-auto px-6 pb-16">
+          <h2 className="text-2xl font-bold text-stone-900 mb-2" style={headingStyle}>
+            Optional Extras
+          </h2>
+          <p className="text-sm text-stone-500 mb-6">
+            Available at your accommodations — speak to your travel designer to add any of these to your itinerary.
+          </p>
+          <div className="space-y-5">
+            {tripAddOns.map((group, gi) => (
+              <div key={gi} className="rounded-2xl border border-stone-200 bg-white p-5">
+                <p className="text-[11px] uppercase tracking-wider text-stone-400 font-semibold mb-3">{group.hotelName}</p>
+                <div className="divide-y divide-stone-100">
+                  {group.addOns.map((a, ai) => (
+                    <div key={ai} className="py-3 first:pt-0 last:pb-0 flex items-start justify-between gap-4">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-stone-700">{a.name}</p>
+                        {a.description && (
+                          <p className="text-xs text-stone-500 mt-0.5 leading-relaxed">{a.description}</p>
+                        )}
+                      </div>
+                      <div className="text-right whitespace-nowrap">
+                        <div className="text-sm font-semibold text-stone-800">
+                          {formatCurrency(a.amountInQuoteCurrency || 0, quote.pricing?.currency)}
+                        </div>
+                        <div className="text-[10px] text-stone-400">{formatAddOnUnit(a.unit)}</div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             ))}
@@ -634,38 +965,77 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                 {formatCurrency(quote.pricing?.perPersonPrice || 0, quote.pricing?.currency)} per person
               </p>
             )}
+
+            {/* Pass-through fees — park, community, government levies. These
+                are not auto-added to the nightly cost; they're surfaced here
+                so the client knows exactly what they're paying for. */}
+            {tripFees.length > 0 && (
+              <div className="mt-6 pt-5 border-t border-stone-200">
+                <p className="text-xs font-bold uppercase tracking-wider text-stone-400 mb-2">
+                  Park & Government Fees
+                </p>
+                <div className="space-y-1.5">
+                  {tripFees.map((fee, i) => (
+                    <div key={i} className="flex items-center justify-between text-sm gap-3">
+                      <div className="text-stone-600 min-w-0 truncate">
+                        {fee.name}
+                        {fee.source && <span className="text-stone-400 italic"> — {fee.source}</span>}
+                      </div>
+                      <div className="text-stone-700 font-medium whitespace-nowrap">
+                        {formatCurrency(fee.amount, quote.pricing?.currency)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-stone-400 mt-2 italic">
+                  Pass-through fees collected by the property and remitted to the issuing authority.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </section>
       )}
 
       {/* ─── INCLUSIONS / EXCLUSIONS BLOCKS ─────────── */}
-      {(blockEnabled('inclusions') || blockEnabled('exclusions')) && (quote.inclusions?.length > 0 || quote.exclusions?.length > 0) && (
+      {(blockEnabled('inclusions') || blockEnabled('exclusions')) && (mergedInclusions.length > 0 || mergedExclusions.length > 0) && (
         <section className="max-w-5xl mx-auto px-6 pb-16">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 p-6 rounded-2xl border border-stone-200 bg-white">
-            {blockEnabled('inclusions') && quote.inclusions?.length > 0 && (
+            {blockEnabled('inclusions') && mergedInclusions.length > 0 && (
               <div>
                 <h4 className="text-xs font-bold uppercase tracking-wider text-stone-400 mb-3 flex items-center gap-1">
                   <CheckCircle className="w-3.5 h-3.5 text-green-500" /> Included
                 </h4>
                 <div className="space-y-1.5">
-                  {quote.inclusions.map((inc, i) => (
+                  {mergedInclusions.map((row, i) => (
                     <p key={i} className="text-sm text-stone-600 flex items-start gap-2">
-                      <span className="text-green-500 mt-0.5">→</span> {inc}
+                      <span className="text-green-500 mt-0.5">→</span>
+                      <span>
+                        {row.text}
+                        {row.source && (
+                          <span className="text-stone-400 italic"> — {row.source}</span>
+                        )}
+                      </span>
                     </p>
                   ))}
                 </div>
               </div>
             )}
-            {blockEnabled('exclusions') && quote.exclusions?.length > 0 && (
+            {blockEnabled('exclusions') && mergedExclusions.length > 0 && (
               <div>
                 <h4 className="text-xs font-bold uppercase tracking-wider text-stone-400 mb-3 flex items-center gap-1">
                   <XCircle className="w-3.5 h-3.5 text-stone-400" /> Excluded
                 </h4>
                 <div className="space-y-1.5">
-                  {quote.exclusions.map((exc, i) => (
+                  {mergedExclusions.map((row, i) => (
                     <p key={i} className="text-sm text-stone-500 flex items-start gap-2">
-                      <span className="text-stone-400 mt-0.5">→</span> {exc}
+                      <span className="text-stone-400 mt-0.5">→</span>
+                      <span>
+                        {row.text}
+                        {row.source && (
+                          <span className="text-stone-400 italic"> — {row.source}</span>
+                        )}
+                      </span>
                     </p>
                   ))}
                 </div>
@@ -676,11 +1046,78 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
       )}
 
       {/* ─── PAYMENT TERMS BLOCK ───────────────────── */}
-      {blockEnabled('payment_terms') && quote.paymentTerms && (
+      {blockEnabled('payment_terms') && (quote.paymentTerms || tripPolicy.depositPct > 0 || tripPolicy.cancellationTiers.length > 0 || tripPolicy.bookingTerms.length > 0) && (
         <section className="max-w-5xl mx-auto px-6 pb-16">
-          <div className="p-6 rounded-2xl bg-stone-50 border border-stone-200">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-stone-400 mb-2">Payment Terms</h4>
-            <p className="text-sm text-stone-600">{quote.paymentTerms}</p>
+          <div className="p-6 rounded-2xl bg-stone-50 border border-stone-200 space-y-5">
+            <div>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-stone-400 mb-2">Payment & Booking Terms</h4>
+              {quote.paymentTerms && (
+                <p className="text-sm text-stone-600 whitespace-pre-line">{quote.paymentTerms}</p>
+              )}
+            </div>
+
+            {tripPolicy.depositPct > 0 && (
+              <div className="flex items-center gap-3">
+                <div className="text-2xl font-bold" style={{ color: primaryColor }}>
+                  {tripPolicy.depositPct}%
+                </div>
+                <div className="text-sm text-stone-600">
+                  Deposit due at booking
+                  <p className="text-xs text-stone-400">
+                    Balance due before travel commences.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {tripPolicy.cancellationTiers.length > 0 && (
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-stone-400 mb-2">
+                  Cancellation Policy
+                </p>
+                <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-stone-200 bg-stone-50">
+                        <th className="text-left py-2 px-3 text-[11px] font-semibold text-stone-400 uppercase tracking-wider">Days Before Travel</th>
+                        <th className="text-right py-2 px-3 text-[11px] font-semibold text-stone-400 uppercase tracking-wider">Penalty</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tripPolicy.cancellationTiers.map((t, i) => (
+                        <tr key={i} className="border-b border-stone-100 last:border-0">
+                          <td className="py-2 px-3 text-stone-600">
+                            {t.daysBefore}+ days
+                            {t.sources && t.sources.length > 0 && (
+                              <span className="text-[10px] text-stone-400 italic ml-2">
+                                ({t.sources.join(', ')})
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2 px-3 text-right text-stone-700 font-semibold">{t.penaltyPct}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {tripPolicy.bookingTerms.length > 0 && (
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-stone-400 mb-2">
+                  Booking Terms
+                </p>
+                <div className="space-y-3">
+                  {tripPolicy.bookingTerms.map((bt, i) => (
+                    <div key={i}>
+                      <p className="text-[11px] text-stone-400 italic mb-0.5">{bt.source}</p>
+                      <p className="text-sm text-stone-600 whitespace-pre-line">{bt.text}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </section>
       )}

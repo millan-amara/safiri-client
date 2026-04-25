@@ -39,6 +39,19 @@ export const mealPlanLabels = {
   HB: 'Half Board',
   FB: 'Full Board',
   AI: 'All Inclusive',
+  GAME_PACKAGE: 'Game Package',
+};
+
+// Format an activity duration (stored as hours, possibly fractional) into a
+// short label. Returns '' for 0/missing so callers can short-circuit.
+export const formatDuration = (hours) => {
+  const h = Number(hours) || 0;
+  if (h <= 0) return '';
+  if (h < 1) return `${Math.round(h * 60)} min`;
+  if (h === 1) return '1 hr';
+  if (h < 24) return `${h % 1 === 0 ? h : h.toFixed(1)} hrs`;
+  const days = h / 24;
+  return `${days % 1 === 0 ? days : days.toFixed(1)} day${days >= 2 ? 's' : ''}`;
 };
 
 export const seasonLabels = {
