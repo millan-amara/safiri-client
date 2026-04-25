@@ -9,6 +9,8 @@ import {
   Sparkles, Mail, Edit3, Save, Upload, Paperclip, Trash2,
 } from 'lucide-react';
 import ConfirmDialog from '../components/shared/ConfirmDialog';
+import ScheduledMessagesPanel from '../components/crm/ScheduledMessagesPanel';
+import InvoicesPanel from '../components/crm/InvoicesPanel';
 
 export default function DealDetailPage() {
   const { id } = useParams();
@@ -133,6 +135,12 @@ export default function DealDetailPage() {
 
           {/* Notes — dedicated section */}
           <NotesSection dealId={deal._id} notes={deal.notes || []} onUpdated={fetchDeal} />
+
+          {/* Scheduled messages — pre-trip / post-trip outreach to the client */}
+          <ScheduledMessagesPanel deal={deal} />
+
+          {/* Invoices — generate / download / track payment for this deal */}
+          <InvoicesPanel deal={deal} />
 
           {/* Activity Timeline — auto events only */}
           <div className="bg-card rounded-xl border border-border p-4 sm:p-5">

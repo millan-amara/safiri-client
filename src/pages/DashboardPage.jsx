@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
 import { formatCurrency, formatDate } from '../utils/helpers';
@@ -10,9 +10,15 @@ import {
   Calendar, ChevronRight, Briefcase, Building2, Star,
   Layers,
 } from 'lucide-react';
+import OnboardingChecklist from '../components/onboarding/OnboardingChecklist';
+import MySourcedLeadsCard from '../components/dashboard/MySourcedLeadsCard';
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const location = useLocation();
+  // ?onboarding=open — sidebar "Getting started" link sets this to force the checklist
+  // back into view even if the user previously dismissed it.
+  const forceOnboarding = new URLSearchParams(location.search).get('onboarding') === 'open';
   const [stats, setStats] = useState(null);
   const [partnerStats, setPartnerStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -99,6 +105,9 @@ export default function DashboardPage() {
         </p>
       </div>
 
+      {/* First-login checklist — hides itself once dismissed or 100% complete */}
+      <OnboardingChecklist forceShow={forceOnboarding} />
+
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {statCards.map(({ label, value, sub, icon: Icon, link, iconBg, iconColor }) => (
@@ -119,6 +128,9 @@ export default function DashboardPage() {
           </Link>
         ))}
       </div>
+
+      {/* Per-user feedback loop — what happened to leads I sourced */}
+      <MySourcedLeadsCard />
 
       {/* Main Analytics Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">

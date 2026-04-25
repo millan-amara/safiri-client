@@ -1,4 +1,4 @@
-import { Outlet, NavLink, useLocation, Link } from 'react-router-dom';
+import { Outlet, NavLink, useLocation, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { getInitials } from '../../utils/helpers';
 import api from '../../utils/api';
@@ -22,6 +22,8 @@ import {
   Image as ImageIcon,
   MoreHorizontal,
   User as UserIcon,
+  Sparkles,
+  Receipt,
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 
@@ -31,6 +33,7 @@ const navItems = [
   { path: '/destinations', icon: MapPin, label: 'Destinations' },
   { path: '/crm', icon: Users, label: 'CRM' },
   { path: '/quotes', icon: FileText, label: 'Quotes' },
+  { path: '/invoices', icon: Receipt, label: 'Invoices' },
   { path: '/automations', icon: Zap, label: 'Automations' },
   { path: '/admin/library', icon: ImageIcon, label: 'Image Library', superAdminOnly: true },
   { path: '/settings', icon: Settings, label: 'Settings' },
@@ -47,8 +50,16 @@ const bottomNavItems = [
 export default function AppLayout() {
   const { user, organization, logout } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+
+  // Reopens the dashboard onboarding checklist even if the user previously dismissed it.
+  // Fire-and-forget the server reset so the navigation isn't blocked on the API.
+  const openGettingStarted = () => {
+    api.post('/onboarding/reopen').catch(() => {});
+    navigate('/?onboarding=open');
+  };
 
   // Derive page title from current route
   const currentPageLabel = (() => {
@@ -111,6 +122,19 @@ export default function AppLayout() {
               {!collapsed && <span>{label}</span>}
             </NavLink>
           ))}
+          {/* Getting Started — re-opens dashboard onboarding card even after dismissal */}
+          <button
+            onClick={openGettingStarted}
+            className={`
+              w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
+              text-sand-600 hover:text-slate-brand hover:bg-sand-100 transition-all duration-150
+              ${collapsed ? 'justify-center' : ''}
+            `}
+            title="Getting started"
+          >
+            <Sparkles className="w-[18px] h-[18px] flex-shrink-0" />
+            {!collapsed && <span>Getting started</span>}
+          </button>
         </nav>
 
         {/* User section */}
@@ -177,6 +201,7 @@ export default function AppLayout() {
           user={user}
           logout={logout}
           onClose={() => setMoreOpen(false)}
+          onOpenGettingStarted={() => { setMoreOpen(false); openGettingStarted(); }}
         />
       )}
     </div>
@@ -294,9 +319,10 @@ function MobileBottomNav({ onMoreClick, currentPath }) {
   );
 }
 
-function MoreSheet({ user, logout, onClose }) {
+function MoreSheet({ user, logout, onClose, onOpenGettingStarted }) {
   const moreItems = [
     { path: '/destinations', icon: MapPin, label: 'Destinations' },
+    { path: '/invoices', icon: Receipt, label: 'Invoices' },
     { path: '/automations', icon: Zap, label: 'Automations' },
     ...(user?.isSuperAdmin ? [{ path: '/admin/library', icon: ImageIcon, label: 'Image Library' }] : []),
     { path: '/settings', icon: Settings, label: 'Settings' },
@@ -319,6 +345,13 @@ function MoreSheet({ user, logout, onClose }) {
           </button>
         </div>
         <div className="py-2">
+          <button
+            onClick={onOpenGettingStarted}
+            className="w-full flex items-center gap-3 px-5 py-3.5 text-sm text-foreground hover:bg-muted transition-colors"
+          >
+            <Sparkles className="w-5 h-5 flex-shrink-0" strokeWidth={1.8} />
+            Getting started
+          </button>
           {moreItems.map(({ path, icon: Icon, label }) => (
             <NavLink
               key={path}

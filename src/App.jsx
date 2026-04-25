@@ -20,6 +20,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
 import BillingPage from './pages/billing/BillingPage';
 import LibraryAdminPage from './pages/LibraryAdminPage';
+import InvoicesPage from './pages/InvoicesPage';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -59,6 +60,7 @@ export default function App() {
         <Route path="quotes" element={<QuotesPage />} />
         <Route path="quotes/new" element={<QuoteBuilderPage />} />
         <Route path="quotes/:id" element={<QuoteBuilderPage />} />
+        <Route path="invoices" element={<InvoicesPage />} />
         <Route path="automations" element={<AutomationsPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="settings/billing" element={<BillingPage />} />

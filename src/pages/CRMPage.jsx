@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
 import { formatCurrency, formatDate, getInitials } from '../utils/helpers';
@@ -8,16 +8,20 @@ import CSVImportModal from '../components/crm/CSVImportModal';
 import DealModal from '../components/crm/DealModal';
 import ContactModal from '../components/crm/ContactModal';
 import TaskModal from '../components/crm/TaskModal';
+import CalendarView from '../components/crm/CalendarView';
+import BulkActionsBar from '../components/crm/BulkActionsBar';
+import SavedViewsDropdown from '../components/crm/SavedViewsDropdown';
 import {
   Users, Kanban, CheckSquare, Plus, Search, X, Mail, Phone,
   MapPin, Calendar, DollarSign, ArrowRight, Clock, MoreHorizontal, Upload,
-  ChevronDown, Edit2, Trash2, AlertCircle,
+  ChevronDown, Edit2, Trash2, AlertCircle, CalendarDays, Square,
 } from 'lucide-react';
 
 const CRM_TABS = [
   { id: 'pipeline', label: 'Pipeline', icon: Kanban },
   { id: 'contacts', label: 'Contacts', icon: Users },
   { id: 'tasks', label: 'Tasks', icon: CheckSquare },
+  { id: 'calendar', label: 'Calendar', icon: CalendarDays },
 ];
 
 export default function CRMPage() {
@@ -38,27 +42,56 @@ export default function CRMPage() {
   const [expandedTask, setExpandedTask] = useState(null);
   const [deleteTaskId, setDeleteTaskId] = useState(null);
   const [team, setTeam] = useState([]);
-  // Filters
-  const [filterAssignee, setFilterAssignee] = useState(isAdmin ? 'all' : 'mine');
+  // Bulk-select state (kanban only). A non-empty set surfaces the BulkActionsBar.
+  const [selectedDealIds, setSelectedDealIds] = useState(new Set());
+  const toggleSelectDeal = (id) => {
+    setSelectedDealIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const clearSelection = () => setSelectedDealIds(new Set());
+  // Drop selection when leaving the pipeline tab so it doesn't haunt the user.
+  useEffect(() => {
+    if (tab !== 'pipeline' && selectedDealIds.size > 0) clearSelection();
+  }, [tab]);
+
+  // Filters — "?sourced=me" comes from the Dashboard "Your sourced leads" card
+  // so the user lands on the kanban already filtered to deals they originated.
+  const location = useLocation();
+  const initialAssignee = new URLSearchParams(location.search).get('sourced') === 'me'
+    ? 'sourced-by-me'
+    : (isAdmin ? 'all' : 'mine');
+  const [filterAssignee, setFilterAssignee] = useState(initialAssignee);
   const [filterStage, setFilterStage] = useState('all');
   const [filterSource, setFilterSource] = useState('all');
   const navigate = useNavigate();
 
+  // Saved pipeline views — per-user filter combos.
+  const [savedViews, setSavedViews] = useState([]);
+  const [activeViewId, setActiveViewId] = useState(null);
+  // Once-per-mount guard so we only auto-restore the last-used view on initial
+  // load, not on every fetchAll() refresh.
+  const autoAppliedRef = useRef(false);
+
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const [c, d, p, t, tm] = await Promise.all([
+      const [c, d, p, t, tm, sv] = await Promise.all([
         api.get('/crm/contacts'),
         api.get('/crm/deals'),
         api.get('/crm/pipelines'),
         api.get('/crm/tasks'),
         api.get('/settings/team'),
+        api.get('/saved-views', { params: { scope: 'pipeline' } }).catch(() => ({ data: { views: [] } })),
       ]);
       setContacts(c.data.contacts);
       setDeals(d.data.deals);
       setPipelines(p.data.pipelines);
       setTasks(t.data.tasks);
       setTeam(tm.data.members);
+      setSavedViews(sv.data.views || []);
     } catch (err) {
       toast.error('Failed to load CRM data');
     } finally {
@@ -73,25 +106,159 @@ export default function CRMPage() {
     ? pipelines.find(p => p._id === selectedPipelineId)
     : pipelines.find(p => p.isDefault) || pipelines[0];
 
+  // Snapshot of the current pipeline filter state — used to compare against
+  // the active saved view to detect "modified" status, and as the body of POST
+  // /saved-views when the operator hits "Save current view as…".
+  const currentPipelineFilters = {
+    search,
+    filterAssignee,
+    filterStage,
+    filterSource,
+    pipelineId: activePipeline?._id || null,
+  };
+  const activeView = savedViews.find(v => v._id === activeViewId);
+  const hasUnsavedChanges = activeView
+    ? JSON.stringify(currentPipelineFilters) !== JSON.stringify(activeView.filters || {})
+    : false;
+
+  // Fire-and-forget: remember which view the operator last applied so we can
+  // auto-restore it next time CRMPage mounts (next session, refresh, or nav-back).
+  const persistLastUsedView = (viewId) => {
+    api.put('/saved-views/preference', { viewId }).catch(() => {});
+  };
+
+  const applyView = (view) => {
+    setActiveViewId(view._id);
+    const f = view.filters || {};
+    setSearch(f.search || '');
+    setFilterAssignee(f.filterAssignee || (isAdmin ? 'all' : 'mine'));
+    setFilterStage(f.filterStage || 'all');
+    setFilterSource(f.filterSource || 'all');
+    if (f.pipelineId) setSelectedPipelineId(f.pipelineId);
+    persistLastUsedView(view._id);
+  };
+
+  const clearViewToDefaults = () => {
+    setActiveViewId(null);
+    setSearch('');
+    setFilterAssignee(isAdmin ? 'all' : 'mine');
+    setFilterStage('all');
+    setFilterSource('all');
+    // Pipeline selection intentionally preserved — "Clear" resets filters, not the pipeline tab.
+    persistLastUsedView(null);
+  };
+
+  const saveCurrentAsView = async (name) => {
+    try {
+      const { data } = await api.post('/saved-views', {
+        name, scope: 'pipeline', filters: currentPipelineFilters,
+      });
+      setSavedViews(prev => [...prev, data]);
+      setActiveViewId(data._id);
+      toast.success(`View "${name}" saved`);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Save failed');
+    }
+  };
+
+  const updateActiveView = async () => {
+    if (!activeViewId) return;
+    try {
+      const { data } = await api.put(`/saved-views/${activeViewId}`, {
+        filters: currentPipelineFilters,
+      });
+      setSavedViews(prev => prev.map(v => v._id === data._id ? data : v));
+      toast.success('View updated');
+    } catch {
+      toast.error('Update failed');
+    }
+  };
+
+  const renameView = async (viewId, name) => {
+    try {
+      const { data } = await api.put(`/saved-views/${viewId}`, { name });
+      setSavedViews(prev => prev.map(v => v._id === data._id ? data : v));
+    } catch {
+      toast.error('Rename failed');
+    }
+  };
+
+  const deleteView = async (viewId) => {
+    try {
+      await api.delete(`/saved-views/${viewId}`);
+      setSavedViews(prev => prev.filter(v => v._id !== viewId));
+      if (activeViewId === viewId) {
+        setActiveViewId(null);
+        persistLastUsedView(null);
+      }
+    } catch {
+      toast.error('Delete failed');
+    }
+  };
+
+  // Auto-restore the user's last-used pipeline view once savedViews finish
+  // loading. Guarded by autoAppliedRef so it fires once per mount, not on
+  // every fetchAll() refresh.
+  useEffect(() => {
+    if (autoAppliedRef.current) return;
+    if (loading) return;
+    if (!user?.lastPipelineViewId) { autoAppliedRef.current = true; return; }
+    const v = savedViews.find(sv => sv._id === user.lastPipelineViewId);
+    if (v) applyView(v);
+    autoAppliedRef.current = true;
+  }, [loading, savedViews, user]);
+
+  // "Sourced by me" only narrows deals (contacts/tasks aren't pipeline-sourced).
+  // When that filter is active on the Contacts/Tasks tabs, treat as 'all' so the
+  // tab isn't mysteriously empty.
+  const sourcedByMe = filterAssignee === 'sourced-by-me';
+  const effectiveAssigneeForOthers = sourcedByMe ? 'all' : filterAssignee;
+
+  const matchesAssignee = (assignedTo, mode) => {
+    if (mode === 'all') return true;
+    if (mode === 'mine') return assignedTo?._id === user?._id || assignedTo === user?._id;
+    return assignedTo?._id === mode;
+  };
+
   // Apply filters
   const filteredContacts = contacts.filter(c => {
-    if (filterAssignee === 'mine' && c.assignedTo?._id !== user?._id && c.assignedTo !== user?._id) return false;
-    if (filterAssignee !== 'all' && filterAssignee !== 'mine' && c.assignedTo?._id !== filterAssignee) return false;
+    if (!matchesAssignee(c.assignedTo, effectiveAssigneeForOthers)) return false;
     if (search && !`${c.firstName} ${c.lastName} ${c.email} ${c.company}`.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
 
+  // Tab-aware search predicate. Searches the fields most likely to be on the tip
+  // of the operator's tongue when looking up a record.
+  const haystackMatches = (parts) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return parts.filter(Boolean).join(' ').toLowerCase().includes(q);
+  };
+
   const filteredDeals = deals.filter(d => {
-    if (filterAssignee === 'mine' && d.assignedTo?._id !== user?._id && d.assignedTo !== user?._id) return false;
-    if (filterAssignee !== 'all' && filterAssignee !== 'mine' && d.assignedTo?._id !== filterAssignee) return false;
+    if (sourcedByMe) {
+      const creatorId = d.createdBy?._id || d.createdBy;
+      if (String(creatorId) !== String(user?._id)) return false;
+    } else if (!matchesAssignee(d.assignedTo, filterAssignee)) {
+      return false;
+    }
     if (filterStage !== 'all' && d.stage !== filterStage) return false;
     if (filterSource !== 'all' && d.leadSource !== filterSource) return false;
+    if (!haystackMatches([
+      d.title, d.destination, d.arrivalCity,
+      d.contact?.firstName, d.contact?.lastName, d.contact?.email, d.contact?.company,
+      ...(d.tags || []),
+    ])) return false;
     return true;
   });
 
   const filteredTasks = tasks.filter(t => {
-    if (filterAssignee === 'mine' && t.assignedTo?._id !== user?._id && t.assignedTo !== user?._id) return false;
-    if (filterAssignee !== 'all' && filterAssignee !== 'mine' && t.assignedTo?._id !== filterAssignee) return false;
+    if (!matchesAssignee(t.assignedTo, effectiveAssigneeForOthers)) return false;
+    if (!haystackMatches([
+      t.title, t.description,
+      t.deal?.title,
+      t.contact?.firstName, t.contact?.lastName,
+    ])) return false;
     return true;
   });
 
@@ -104,7 +271,11 @@ export default function CRMPage() {
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-brand" style={{ fontFamily: 'Playfair Display, serif' }}>CRM</h1>
           <p className="text-xs sm:text-sm text-sand-500 mt-0.5">
-            {contacts.length} contacts · {deals.filter(d => !['Won','Lost'].includes(d.stage)).length} active deals
+            {contacts.length} contacts · {deals.filter(d => {
+              const stages = d.pipeline?.stages || [];
+              const stage = stages.find(s => s.name === d.stage);
+              return (stage?.type || 'open') === 'open';
+            }).length} active deals
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -136,11 +307,35 @@ export default function CRMPage() {
           ))}
         </div>
 
-        {/* Filters */}
+        {/* Search + filters */}
         <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative w-full sm:w-56">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-sand-400 pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={
+                tab === 'pipeline' ? 'Search deals, clients, destinations...' :
+                tab === 'contacts' ? 'Search contacts...' :
+                'Search tasks...'
+              }
+              className="w-full pl-8 pr-7 py-1.5 rounded-md bg-white border border-sand-200 text-xs text-slate-brand placeholder:text-sand-400 focus:outline-none focus:border-amber-brand"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-sand-400 hover:text-slate-brand hover:bg-sand-100"
+                title="Clear search"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
           <select value={filterAssignee} onChange={e => setFilterAssignee(e.target.value)} className={selectCls}>
             <option value="all">All team</option>
-            <option value="mine">My items</option>
+            <option value="mine">Assigned to me</option>
+            <option value="sourced-by-me">Sourced by me</option>
             {team?.map(m => <option key={m._id} value={m._id}>{m.name}</option>)}
           </select>
           {tab === 'pipeline' && (
@@ -173,10 +368,10 @@ export default function CRMPage() {
           {/* PIPELINE VIEW */}
           {tab === 'pipeline' && (
             <>
-              {/* Pipeline selector */}
+              {/* Pipeline selector + saved views */}
               {pipelines.length > 0 && (
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap">
                     {pipelines.map((p) => (
                       <button
                         key={p._id}
@@ -191,6 +386,17 @@ export default function CRMPage() {
                       </button>
                     ))}
                   </div>
+                  <SavedViewsDropdown
+                    views={savedViews}
+                    activeViewId={activeViewId}
+                    hasUnsavedChanges={hasUnsavedChanges}
+                    onApply={applyView}
+                    onClear={clearViewToDefaults}
+                    onSaveAs={saveCurrentAsView}
+                    onUpdate={updateActiveView}
+                    onRename={renameView}
+                    onDelete={deleteView}
+                  />
                 </div>
               )}
 
@@ -198,6 +404,8 @@ export default function CRMPage() {
                 <PipelineKanban
                   pipeline={activePipeline}
                   deals={filteredDeals.filter(d => d.pipeline?._id === activePipeline._id || d.pipeline === activePipeline._id)}
+                  selectedIds={selectedDealIds}
+                  onToggleSelect={toggleSelectDeal}
                   onDealMoved={(dealId, newStage) => {
                     // Optimistic update — move card instantly
                     setDeals(prev => prev.map(d =>
@@ -218,16 +426,6 @@ export default function CRMPage() {
           {/* CONTACTS VIEW */}
           {tab === 'contacts' && (
             <div className="space-y-3">
-              <div className="relative w-full sm:w-64">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-sand-400" />
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search contacts..."
-                  className="w-full pl-9 pr-3 py-2 rounded-lg bg-white border border-sand-200 text-sm focus:outline-none focus:border-amber-brand transition-colors"
-                />
-              </div>
               <div className="bg-white rounded-xl border border-sand-200 divide-y divide-sand-100">
                 {filteredContacts.map((contact) => (
                   <Link key={contact._id} to={`/crm/contacts/${contact._id}`} className="flex items-center justify-between gap-2 px-3 sm:px-4 py-3 hover:bg-sand-50 transition-colors">
@@ -281,6 +479,11 @@ export default function CRMPage() {
               fetchAll={fetchAll}
             />
           )}
+
+          {/* CALENDAR VIEW */}
+          {tab === 'calendar' && (
+            <CalendarView deals={filteredDeals} tasks={filteredTasks} />
+          )}
         </>
       )}
 
@@ -322,13 +525,24 @@ export default function CRMPage() {
           onImported={fetchAll}
         />
       )}
+
+      {/* Bulk actions bar — floats when one or more deals are selected on the kanban */}
+      {tab === 'pipeline' && selectedDealIds.size > 0 && (
+        <BulkActionsBar
+          selectedIds={selectedDealIds}
+          pipeline={activePipeline}
+          team={team}
+          onClear={clearSelection}
+          onComplete={fetchAll}
+        />
+      )}
     </div>
   );
 }
 
 // ─── PIPELINE KANBAN with drag-and-drop ──────────
 
-function PipelineKanban({ pipeline, deals, onDealMoved }) {
+function PipelineKanban({ pipeline, deals, onDealMoved, selectedIds = new Set(), onToggleSelect }) {
   const [draggedDeal, setDraggedDeal] = useState(null);
   const [dragOverStage, setDragOverStage] = useState(null);
   const navigate = useNavigate();
@@ -399,16 +613,38 @@ function PipelineKanban({ pipeline, deals, onDealMoved }) {
                     isDragOver ? 'bg-amber-50 border-2 border-dashed border-amber-300' : 'border-2 border-transparent'
                   }`}
                 >
-                  {stageDeals.map((deal) => (
+                  {stageDeals.map((deal) => {
+                    const isSelected = selectedIds.has(deal._id);
+                    return (
                     <div
                       key={deal._id}
                       draggable
                       onDragStart={(e) => handleDragStart(e, deal)}
                       onDragEnd={handleDragEnd}
                       onClick={() => navigate(`/crm/deals/${deal._id}`)}
-                      className="bg-white rounded-lg border border-sand-200 p-3 hover:border-sand-300 hover:shadow-sm transition-all cursor-grab active:cursor-grabbing group"
+                      className={`bg-white rounded-lg border p-3 hover:shadow-sm transition-all cursor-grab active:cursor-grabbing group relative ${
+                        isSelected
+                          ? 'border-amber-brand ring-2 ring-amber-brand/30 bg-amber-50/40'
+                          : 'border-sand-200 hover:border-sand-300'
+                      }`}
                     >
-                      <p className="text-sm font-medium text-slate-brand mb-1">{deal.title}</p>
+                      {/* Selection checkbox — separate hit target so card click still opens detail */}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onToggleSelect?.(deal._id); }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        draggable={false}
+                        onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                        className={`absolute top-2 right-2 w-4 h-4 rounded border flex items-center justify-center transition-all ${
+                          isSelected
+                            ? 'bg-amber-brand border-amber-brand text-white'
+                            : 'border-sand-300 bg-white opacity-0 group-hover:opacity-100 hover:border-amber-brand'
+                        }`}
+                        aria-label={isSelected ? 'Deselect' : 'Select'}
+                        title={isSelected ? 'Deselect' : 'Select'}
+                      >
+                        {isSelected && <CheckSquare className="w-3 h-3" />}
+                      </button>
+                      <p className="text-sm font-medium text-slate-brand mb-1 pr-5">{deal.title}</p>
                       {deal.contact && (
                         <p className="text-xs text-sand-500 mb-2">{deal.contact.firstName} {deal.contact.lastName}</p>
                       )}
@@ -437,7 +673,8 @@ function PipelineKanban({ pipeline, deals, onDealMoved }) {
                         )}
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
 
                   {stageDeals.length === 0 && !isDragOver && (
                     <div className="py-6 text-center">
