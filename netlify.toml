@@ -2,3 +2,12 @@
      from = "/*"
      to = "/index.html"
      status = 200
+
+# Block search engines across the whole app domain. The HTML meta tag does
+# the same thing for crawlers that render the page; this catches the ones
+# that only inspect HTTP headers (and is the more authoritative signal of
+# the two).
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"

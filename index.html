@@ -3,6 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- The SPA at app.safiripro.com is entirely auth-walled or share-link-gated.
+         No route belongs in search results — and the public quote share page
+         (/quote/:token) would leak operator pricing if indexed. The marketing
+         site at safiripro.com handles all SEO; this app is invisible to crawlers. -->
+    <meta name="robots" content="noindex, nofollow" />
     <title>SafiriPro — Travel Sales</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
