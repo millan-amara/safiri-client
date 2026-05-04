@@ -12,20 +12,25 @@ import {
 import ConfirmDialog from '../components/shared/ConfirmDialog';
 import ScheduledMessagesPanel from '../components/crm/ScheduledMessagesPanel';
 import InvoicesPanel from '../components/crm/InvoicesPanel';
+import VouchersPanel from '../components/crm/VouchersPanel';
+import SendEmailModal from '../components/crm/SendEmailModal';
 
 export default function DealDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [deal, setDeal] = useState(null);
   const [tasks, setTasks] = useState([]);
+  const [quotes, setQuotes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showSendEmail, setShowSendEmail] = useState(false);
 
   const fetchDeal = async () => {
     try {
       const { data } = await api.get(`/crm/deals/${id}`);
       setDeal(data.deal);
       setTasks(data.tasks);
+      setQuotes(data.quotes || []);
     } catch {
       toast.error('Deal not found');
       navigate('/crm');
@@ -83,6 +88,12 @@ export default function DealDetailPage() {
           >
             <Trash2 className="w-4 h-4" /> Archive
           </button>
+          <button
+            onClick={() => setShowSendEmail(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-lg border border-border text-sm text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors"
+          >
+            <Mail className="w-4 h-4" /> Send email
+          </button>
           {allReady && (
             <Link
               to={`/quotes/new?deal=${deal._id}`}
@@ -105,6 +116,13 @@ export default function DealDetailPage() {
             navigate('/crm');
           }}
           onCancel={() => setShowDeleteConfirm(false)}
+        />
+      )}
+      {showSendEmail && (
+        <SendEmailModal
+          deal={deal}
+          onClose={() => setShowSendEmail(false)}
+          onSent={() => { setShowSendEmail(false); fetchDeal(); }}
         />
       )}
 
@@ -142,6 +160,9 @@ export default function DealDetailPage() {
 
           {/* Invoices — generate / download / track payment for this deal */}
           <InvoicesPanel deal={deal} />
+
+          {/* Hotel vouchers — issue check-in vouchers for confirmed bookings */}
+          <VouchersPanel deal={deal} />
 
           {/* Activity Timeline — auto events only */}
           <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
@@ -183,16 +204,33 @@ export default function DealDetailPage() {
 
           {/* Linked quotes */}
           <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
-            <h3 className="text-sm font-semibold text-foreground mb-3">Quotes</h3>
-            {deal.quotes?.length > 0 ? (
-              deal.quotes.map((q) => (
-                <Link key={q._id} to={`/quotes/${q._id}`} className="block py-2 border-b border-border last:border-0 hover:bg-background -mx-2 px-2 rounded transition-colors">
-                  <p className="text-sm font-medium text-foreground truncate">{q.title}</p>
-                  <p className="text-xs text-muted-foreground truncate">#{q.quoteNumber} · {q.status}</p>
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <h3 className="text-sm font-semibold text-foreground">Quotes</h3>
+              <Link
+                to={`/quotes/new?deal=${deal._id}`}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-primary hover:bg-primary/10 transition-colors"
+              >
+                <FileText className="w-3 h-3" /> New quote
+              </Link>
+            </div>
+            {quotes.length > 0 ? (
+              quotes.map((q) => (
+                <Link key={q._id} to={`/quotes/${q._id}`} className="flex items-center justify-between gap-2 py-2 border-b border-border last:border-0 hover:bg-background -mx-2 px-2 rounded transition-colors">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-foreground truncate">{q.title}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      #{q.quoteNumber}{q.version > 1 ? ` v${q.version}` : ''} · {q.status}
+                    </p>
+                  </div>
+                  {q.pricing?.totalPrice > 0 && (
+                    <span className="text-xs font-medium text-foreground tabular-nums shrink-0">
+                      {q.pricing.currency} {Math.round(q.pricing.totalPrice).toLocaleString()}
+                    </span>
+                  )}
                 </Link>
               ))
             ) : (
-              <p className="text-xs text-muted-foreground/70 text-center py-2">No quotes yet</p>
+              <p className="text-xs text-muted-foreground/70 text-center py-2">No quotes yet — click "New quote" to start one.</p>
             )}
           </div>
 

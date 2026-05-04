@@ -1,11 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import api from '../../utils/api';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
 import InvoiceModal from './InvoiceModal';
+import InvoiceEmailModal from './InvoiceEmailModal';
+import SplitInvoiceModal from './SplitInvoiceModal';
 import {
   Plus, FileText, Download, Edit2, Trash2, Send, CheckCircle2,
-  XCircle, AlertCircle, ChevronDown, ChevronUp, Receipt,
+  XCircle, AlertCircle, ChevronDown, ChevronUp, Receipt, Mail, Layers,
 } from 'lucide-react';
 
 const STATUS_META = {
@@ -35,9 +37,23 @@ export default function InvoicesPanel({ deal }) {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [splitting, setSplitting] = useState(false);
+  const [emailing, setEmailing] = useState(null);
   const [editing, setEditing] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  // Close the create menu when the user clicks outside.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onClick = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [menuOpen]);
 
   const fetchInvoices = async () => {
     try {
@@ -122,13 +138,40 @@ export default function InvoicesPanel({ deal }) {
           </p>
         </div>
         {canManage && (
-          <button
-            onClick={handleCreate}
-            disabled={creating}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary disabled:opacity-50 transition-colors shrink-0"
-          >
-            <Plus className="w-3.5 h-3.5" /> {creating ? 'Creating...' : 'Create invoice'}
-          </button>
+          <div className="relative" ref={menuRef}>
+            <button
+              onClick={() => setMenuOpen(o => !o)}
+              disabled={creating}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary disabled:opacity-50 transition-colors shrink-0"
+            >
+              <Plus className="w-3.5 h-3.5" /> {creating ? 'Creating...' : 'Create invoice'}
+              <ChevronDown className="w-3 h-3 -mr-0.5" />
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 mt-1 w-60 bg-card border border-border rounded-lg shadow-lg z-10 py-1">
+                <button
+                  onClick={() => { setMenuOpen(false); handleCreate(); }}
+                  className="w-full flex items-start gap-2 px-3 py-2 text-left hover:bg-muted text-xs"
+                >
+                  <FileText className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-medium text-foreground">Single invoice</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">One invoice for the full trip total.</p>
+                  </div>
+                </button>
+                <button
+                  onClick={() => { setMenuOpen(false); setSplitting(true); }}
+                  className="w-full flex items-start gap-2 px-3 py-2 text-left hover:bg-muted text-xs"
+                >
+                  <Layers className="w-3.5 h-3.5 text-primary mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-medium text-foreground">Deposit + balance</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">Two drafts: deposit due soon, balance before travel.</p>
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -168,6 +211,11 @@ export default function InvoicesPanel({ deal }) {
                       <span className={`text-[10px] inline-flex items-center gap-1 px-1.5 py-0.5 rounded border ${meta.className} font-medium uppercase tracking-wide`}>
                         <Icon className="w-3 h-3" /> {meta.label}
                       </span>
+                      {inv.type && inv.type !== 'full' && (
+                        <span className="text-[10px] inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-primary/30 bg-primary/5 text-primary font-medium uppercase tracking-wide">
+                          {inv.type}
+                        </span>
+                      )}
                       <span className="text-sm font-semibold text-foreground tabular-nums">{fmtMoney(inv.total, inv.currency)}</span>
                     </div>
                     <p className="text-[11px] text-muted-foreground mt-0.5">
@@ -224,6 +272,15 @@ export default function InvoicesPanel({ deal }) {
                     >
                       <Download className="w-3.5 h-3.5" />
                     </button>
+                    {canManage && inv.status !== 'cancelled' && (
+                      <button
+                        onClick={() => setEmailing(inv)}
+                        className="p-1.5 rounded text-muted-foreground hover:text-primary hover:bg-muted"
+                        title="Email invoice"
+                      >
+                        <Mail className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     {canManage && editable && (
                       <button
                         onClick={() => setEditing(inv)}
@@ -286,6 +343,20 @@ export default function InvoicesPanel({ deal }) {
           invoice={editing}
           onClose={() => setEditing(null)}
           onSaved={fetchInvoices}
+        />
+      )}
+      {emailing && (
+        <InvoiceEmailModal
+          invoice={emailing}
+          onClose={() => setEmailing(null)}
+          onSent={() => { setEmailing(null); fetchInvoices(); }}
+        />
+      )}
+      {splitting && (
+        <SplitInvoiceModal
+          deal={deal}
+          onClose={() => setSplitting(false)}
+          onCreated={() => { setSplitting(false); fetchInvoices(); }}
         />
       )}
     </div>

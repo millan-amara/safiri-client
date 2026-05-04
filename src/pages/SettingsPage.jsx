@@ -335,6 +335,44 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
+                <div className="mt-5 pt-4 border-t border-border">
+                  <h5 className="text-xs font-semibold text-foreground mb-1">Deposit + Balance</h5>
+                  <p className="text-[11px] text-muted-foreground mb-3">
+                    Defaults for the "Split into deposit + balance" action on the deal page. Operator can override per deal.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">Deposit %</label>
+                      <input
+                        type="number" min={0} max={100} step="1"
+                        value={org.preferences?.depositPercent ?? 30}
+                        onChange={(e) => setOrg({ ...org, preferences: { ...(org.preferences || {}), depositPercent: parseInt(e.target.value) || 0 } })}
+                        className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:border-primary transition-colors"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">Deposit due (days)</label>
+                      <input
+                        type="number" min={0} step="1"
+                        value={org.preferences?.depositDueDays ?? 7}
+                        onChange={(e) => setOrg({ ...org, preferences: { ...(org.preferences || {}), depositDueDays: parseInt(e.target.value) || 0 } })}
+                        className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:border-primary transition-colors"
+                      />
+                      <p className="text-[10px] text-muted-foreground/70 mt-1">From invoice creation</p>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">Balance lead (days)</label>
+                      <input
+                        type="number" min={0} step="1"
+                        value={org.preferences?.balanceDaysBeforeTravel ?? 60}
+                        onChange={(e) => setOrg({ ...org, preferences: { ...(org.preferences || {}), balanceDaysBeforeTravel: parseInt(e.target.value) || 0 } })}
+                        className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:border-primary transition-colors"
+                      />
+                      <p className="text-[10px] text-muted-foreground/70 mt-1">Before travel start</p>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="mt-4">
                   <label className="block text-xs font-medium text-muted-foreground mb-1">Payment Instructions</label>
                   <textarea

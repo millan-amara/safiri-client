@@ -12,6 +12,16 @@ import {
   Coffee, Sun, Sunset, Star, EyeOff, CheckCircle, Clock, AlertTriangle,
 } from 'lucide-react';
 
+// Server reason codes → operator-friendly toast text. The companion warning
+// toast carries the specifics (e.g. configured validity windows).
+const RATE_ERROR_MESSAGES = {
+  no_active_rate_lists: 'This hotel has no active rate lists — configure pricing in Partners.',
+  stay_window_not_covered: "No rate list's validity window covers this date — roll the pricelist forward in Partners.",
+  zero_nights: 'Stay is zero nights — check your start/end dates.',
+  no_rate_list_available: 'No rate list available for this stay.',
+};
+const humanizeRateError = (code) => RATE_ERROR_MESSAGES[code] || `Pricing failed: ${code}`;
+
 export default function QuoteBuilderPage() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
@@ -22,6 +32,7 @@ export default function QuoteBuilderPage() {
     title: '',
     tourType: 'private',
     contact: '',
+    deal: '',
     travelers: { adults: 2, children: 0, childAges: [] },
     startDate: '',
     endDate: '',
@@ -64,7 +75,11 @@ export default function QuoteBuilderPage() {
   const [transport, setTransport] = useState([]);
   const [packages, setPackages] = useState([]);
   const [contacts, setContacts] = useState([]);
+  const [deals, setDeals] = useState([]);
   const [destinations, setDestinations] = useState([]);
+  // 'deal' = pick a deal (primary path; auto-derives contact)
+  // 'contact' = legacy / speculative quotes — pick a contact, no deal
+  const [linkMode, setLinkMode] = useState('deal');
   const [expandedDay, setExpandedDay] = useState(0);
   const [showPreview, setShowPreview] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -79,13 +94,15 @@ export default function QuoteBuilderPage() {
       api.get('/partners/packages'),
       api.get('/crm/contacts'),
       api.get('/destinations'),
-    ]).then(([h, a, t, p, c, d]) => {
+      api.get('/crm/deals'),
+    ]).then(([h, a, t, p, c, d, dl]) => {
       setHotels(h.data.hotels);
       setActivities(a.data.activities);
       setTransport(t.data.transport);
       setPackages(p.data.packages || []);
       setContacts(c.data.contacts);
       setDestinations(d.data.destinations);
+      setDeals(dl.data.deals || []);
     });
   }, []);
 
@@ -245,18 +262,66 @@ export default function QuoteBuilderPage() {
   useEffect(() => {
     if (id) {
       api.get(`/quotes/${id}`).then(({ data }) => {
+        // Server populates `contact` and `deal` — keep state as bare ID strings
+        // so the dropdowns can match `<option value={id}>`. Without this, the
+        // populated objects fall through and the dropdowns show "Select..." on
+        // reopen, making the user think the link didn't persist.
+        const contactId = data.contact?._id || data.contact || '';
+        const dealId = data.deal?._id || data.deal || '';
         setQuote({
           ...data,
+          contact: contactId,
+          deal: dealId,
           days: data.days || [],
           startDate: data.startDate?.split('T')[0] || '',
           endDate: data.endDate?.split('T')[0] || '',
         });
+        // Legacy quotes saved with only a contact (no deal) → start in
+        // contact-only mode so the operator sees what's actually linked.
+        if (!dealId && contactId) setLinkMode('contact');
       }).catch(() => {
         toast.error('Quote not found');
         navigate('/quotes');
       });
     }
   }, [id]);
+
+  // New quote arriving from a deal page (`/quotes/new?deal=<id>`) — pre-fill
+  // the deal link, derived contact, travel dates, and party size from the
+  // deal so the operator doesn't re-key context they already entered. Runs
+  // only once `deals` has loaded so we can find the source object.
+  useEffect(() => {
+    if (id) return;                          // editing an existing quote — skip
+    const dealParam = searchParams.get('deal');
+    if (!dealParam) return;
+    if (!deals.length) return;               // wait for fetch
+    if (quote.deal) return;                  // already populated (e.g. user edited)
+
+    const source = deals.find(d => d._id === dealParam);
+    if (!source) return;
+
+    const contactId = source.contact?._id || source.contact || '';
+    const startDate = source.travelDates?.start ? new Date(source.travelDates.start).toISOString().slice(0, 10) : '';
+    const endDate = source.travelDates?.end ? new Date(source.travelDates.end).toISOString().slice(0, 10) : '';
+
+    setQuote(q => ({
+      ...q,
+      deal: source._id,
+      contact: contactId,
+      // Only override empties — operator may have already typed something.
+      startDate: q.startDate || startDate,
+      endDate: q.endDate || endDate,
+      travelers: {
+        ...q.travelers,
+        adults: source.groupSize > 0 ? source.groupSize : q.travelers.adults,
+      },
+      pricing: {
+        ...q.pricing,
+        currency: source.currency || source.budgetCurrency || q.pricing.currency,
+      },
+    }));
+    setLinkMode('deal');
+  }, [id, deals, searchParams]);
 
   // Recalculate pricing when days change — honors per-day margin overrides
   useEffect(() => {
@@ -475,10 +540,10 @@ export default function QuoteBuilderPage() {
         };
       }
       return {
-        snapshot: { ...baseSnapshot, ratePerNight: 0, ratePerNightInQuoteCurrency: 0, warnings: [data.reason] },
+        snapshot: { ...baseSnapshot, ratePerNight: 0, ratePerNightInQuoteCurrency: 0, warnings: data.warnings || [data.reason] },
         roomType: '',
         error: data.reason || 'unknown',
-        warnings: [],
+        warnings: data.warnings || [],
       };
     } catch (err) {
       return {
@@ -497,8 +562,8 @@ export default function QuoteBuilderPage() {
     const checkIn = quote.startDate ? new Date(quote.startDate) : new Date();
     checkIn.setDate(checkIn.getDate() + dayIndex);
     const result = await priceHotelForCheckIn(hotel, checkIn, opts);
-    if (result.error) toast.error(`No rate resolved: ${result.error}`);
-    if (result.warnings.length) result.warnings.slice(0, 2).forEach(w => toast(w, { icon: '⚠️' }));
+    if (result.error) toast.error(humanizeRateError(result.error), { duration: 6000 });
+    if (result.warnings.length) result.warnings.slice(0, 2).forEach(w => toast(w, { icon: '⚠️', duration: 6000 }));
     updateDay(dayIndex, { hotel: result.snapshot, roomType: result.roomType });
   };
 
@@ -526,8 +591,8 @@ export default function QuoteBuilderPage() {
       preferredRoomType: sourceDay.hotel.roomType,
       preferredMealPlan: sourceDay.hotel.mealPlan,
     });
-    if (result.error) toast.error(`Could not re-price for new night: ${result.error}`);
-    result.warnings.slice(0, 2).forEach(w => toast(w, { icon: '⚠️' }));
+    if (result.error) toast.error(`Could not re-price for new night — ${humanizeRateError(result.error)}`, { duration: 6000 });
+    result.warnings.slice(0, 2).forEach(w => toast(w, { icon: '⚠️', duration: 6000 }));
 
     const days = [...quote.days];
     const newDay = {
@@ -701,10 +766,16 @@ export default function QuoteBuilderPage() {
     if (!quote.title) { toast.error('Please add a title'); return; }
     setSaving(true);
     try {
+      // Coerce contact/deal to bare ID strings — defensive in case they ever
+      // hold a populated object from a stale code path. Empty → null so the
+      // route's normalize step recognizes "unset" and doesn't try to cast ''
+      // to ObjectId.
+      const idOf = (v) => (v && typeof v === 'object' ? v._id : v) || null;
       const payload = {
         ...quote,
         status: status || quote.status || 'draft',
-        deal: searchParams.get('deal') || quote.deal,
+        contact: idOf(quote.contact),
+        deal: idOf(searchParams.get('deal') || quote.deal),
       };
       if (id) {
         await api.put(`/quotes/${id}`, payload);
@@ -840,17 +911,85 @@ export default function QuoteBuilderPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Client</label>
-                <select
-                  value={quote.contact || ''}
-                  onChange={(e) => setQuote({ ...quote, contact: e.target.value || null })}
-                  className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
-                >
-                  <option value="">Select contact...</option>
-                  {contacts.map(c => (
-                    <option key={c._id} value={c._id}>{c.firstName} {c.lastName}{c.company ? ` (${c.company})` : ''}</option>
-                  ))}
-                </select>
+                <div className="flex items-baseline justify-between mb-1">
+                  <label className="block text-xs font-medium text-muted-foreground">
+                    {linkMode === 'deal' ? 'Deal' : 'Client'}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Switching modes clears the OTHER link so we don't ship
+                      // a contact-only save with a stale deal still attached
+                      // (or vice versa).
+                      if (linkMode === 'deal') {
+                        setLinkMode('contact');
+                        setQuote(q => ({ ...q, deal: '' }));
+                      } else {
+                        setLinkMode('deal');
+                        setQuote(q => ({ ...q, contact: '' }));
+                      }
+                    }}
+                    className="text-[11px] text-primary hover:underline"
+                  >
+                    {linkMode === 'deal' ? 'pick a contact instead' : 'pick a deal instead'}
+                  </button>
+                </div>
+
+                {linkMode === 'deal' ? (
+                  <>
+                    <select
+                      value={quote.deal || ''}
+                      onChange={(e) => {
+                        const dealId = e.target.value;
+                        // Auto-derive contact from the picked deal — Deal.contact
+                        // is canonical, and downstream code (share page, voucher
+                        // generator, invoice builder) reads quote.contact.
+                        const picked = deals.find(d => d._id === dealId);
+                        const contactId = picked?.contact?._id || picked?.contact || '';
+                        setQuote({ ...quote, deal: dealId || '', contact: contactId });
+                      }}
+                      className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
+                    >
+                      <option value="">Select deal...</option>
+                      {deals.map(d => {
+                        const c = d.contact;
+                        const who = c ? `${c.firstName || ''} ${c.lastName || ''}`.trim() : '';
+                        return (
+                          <option key={d._id} value={d._id}>
+                            {d.title}{who ? ` — ${who}` : ''}
+                          </option>
+                        );
+                      })}
+                    </select>
+                    {quote.deal && (() => {
+                      const picked = deals.find(d => d._id === quote.deal);
+                      const c = picked?.contact;
+                      if (!c) return null;
+                      const name = `${c.firstName || ''} ${c.lastName || ''}`.trim();
+                      return (
+                        <p className="text-[11px] text-muted-foreground mt-1 truncate">
+                          For: {name}{c.email ? ` · ${c.email}` : ''}
+                        </p>
+                      );
+                    })()}
+                  </>
+                ) : (
+                  <>
+                    <select
+                      value={quote.contact || ''}
+                      onChange={(e) => setQuote({ ...quote, contact: e.target.value || '' })}
+                      className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
+                    >
+                      <option value="">Select contact...</option>
+                      {contacts.map(c => (
+                        <option key={c._id} value={c._id}>{c.firstName} {c.lastName}{c.company ? ` (${c.company})` : ''}</option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      Contact-only quotes won't appear in pipeline reporting or generate vouchers.
+                    </p>
+                  </>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">Start Date</label>
