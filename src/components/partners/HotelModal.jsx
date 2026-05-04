@@ -227,12 +227,24 @@ export default function HotelModal({ hotel, onClose, onSaved }) {
       const pkgNote = packages.length > 0 ? ` and ${packages.length} package${packages.length === 1 ? '' : 's'}` : '';
       toast(`Found ${drafts.length} hotels${pkgNote} — "${drafts[0].name}" loaded here. See banner for the rest.`, { icon: '📑', duration: 7000 });
     } catch (err) {
-      toast.error(err.response?.data?.message || 'PDF extraction failed');
+      // PDF page metering returns 402 with PDF_PAGES_EXHAUSTED — surface the
+      // page count + remaining balance so the operator knows whether to split
+      // the PDF, buy a page pack, or wait for the monthly reset.
+      const data = err.response?.data;
+      if (data?.code === 'PDF_PAGES_EXHAUSTED') {
+        toast.error(
+          `${data.message} (Buy more pages on the Billing page.)`,
+          { duration: 8000 }
+        );
+      } else {
+        toast.error(data?.message || 'PDF extraction failed');
+      }
     } finally {
       setExtracting(false);
-      // AI credits are auto-refunded server-side on any non-2xx response
-      // (see middleware/subscription.js). Refresh the cached org so the UI
-      // balance reflects either the spend (on success) or the refund (on failure).
+      // PDF pages + AI credits are both auto-refunded server-side on any
+      // non-2xx response (see middleware/subscription.js). Refresh the cached
+      // org so the UI balance reflects either the spend (on success) or the
+      // refund (on failure).
       refreshOrganization();
     }
   };

@@ -134,10 +134,13 @@ export default function InvoicesPage() {
     }
   };
 
-  const downloadPdf = (inv) => {
-    const token = localStorage.getItem('token');
-    const base = api.defaults.baseURL?.replace(/\/+$/, '') || '/api';
-    window.open(`${base}/invoices/${inv._id}/pdf?token=${encodeURIComponent(token || '')}`, '_blank');
+  const downloadPdf = async (inv) => {
+    try {
+      const { downloadFile } = await import('../utils/api');
+      await downloadFile(`/invoices/${inv._id}/pdf`, `invoice-${inv.number || inv._id}.pdf`);
+    } catch (err) {
+      toast.error('PDF download failed');
+    }
   };
 
   return (
@@ -286,17 +289,23 @@ function ExportCsvButton({ statusFilter, search }) {
   // operator is looking at, but they can override before downloading.
   useEffect(() => { setStatus(statusFilter || 'all'); }, [statusFilter]);
 
-  const doExport = () => {
-    const token = localStorage.getItem('token');
-    const base = api.defaults.baseURL?.replace(/\/+$/, '') || '/api';
+  const doExport = async () => {
     const params = new URLSearchParams();
     if (from) params.set('from', from);
     if (to) params.set('to', to);
     if (status && status !== 'all') params.set('status', status);
     if (search) params.set('search', search);
-    if (token) params.set('token', token);
-    window.location.href = `${base}/invoices/export.csv?${params.toString()}`;
-    setOpen(false);
+    try {
+      const { downloadFile } = await import('../utils/api');
+      await downloadFile(`/invoices/export.csv?${params.toString()}`, `invoices-${new Date().toISOString().slice(0, 10)}.csv`);
+      setOpen(false);
+    } catch (err) {
+      // Use toast if available; fall back to alert.
+      try {
+        const t = (await import('react-hot-toast')).default;
+        t.error('Export failed');
+      } catch { alert('Export failed'); }
+    }
   };
 
   return (

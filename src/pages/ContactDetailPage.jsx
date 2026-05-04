@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { formatCurrency, formatDate, getInitials } from '../utils/helpers';
+import { safeHref } from '../utils/safeUrl';
 import toast from 'react-hot-toast';
 import PhoneInput from '../components/shared/PhoneInput';
 import ConfirmDialog from '../components/shared/ConfirmDialog';
@@ -377,7 +378,7 @@ export default function ContactDetailPage() {
                         <p className="text-[10px] text-muted-foreground/70">{formatDate(att.uploadedAt)}</p>
                       </div>
                     </div>
-                    <a href={att.url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline shrink-0">View</a>
+                    <a href={safeHref(att.url)} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline shrink-0">View</a>
                   </div>
                 ))}
               </div>

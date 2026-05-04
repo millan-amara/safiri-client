@@ -1,11 +1,9 @@
 import { useState, useMemo } from 'react';
-import { marked } from 'marked';
+import { renderMarkdownSafe } from '../../utils/sanitizeMarkdown';
 import api from '../../utils/api';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
 import { X, Sparkles, Save, Clock, Eye, Edit3 } from 'lucide-react';
-
-marked.use({ breaks: true, gfm: true });
 
 // Mirrors server-side setLocalTimeOfDay. Returns the UTC instant for a given
 // calendar date at hour:minute local time in an IANA timezone.
@@ -95,7 +93,7 @@ export default function ScheduledMessageModal({ deal, message, onClose, onSaved 
     [timingMode, offsetDays, absoluteDate, deal, sendHour, sendTimezone],
   );
   const sendAtIsPast = sendAtPreview && sendAtPreview < new Date();
-  const renderedBody = useMemo(() => marked.parse(body || ''), [body]);
+  const renderedBody = useMemo(() => renderMarkdownSafe(body), [body]);
 
   const handleAiDraft = async () => {
     setDrafting(true);

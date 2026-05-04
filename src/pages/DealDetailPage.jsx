@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { formatCurrency, formatDate, getInitials } from '../utils/helpers';
+import { safeHref } from '../utils/safeUrl';
 import toast from 'react-hot-toast';
 import {
   ArrowLeft, MapPin, Calendar, Users as UsersIcon, DollarSign,
@@ -599,7 +600,7 @@ function DealAttachments({ dealId, attachments, onUpdated }) {
               <div className="flex items-center gap-2 min-w-0 flex-1">
                 <FileText className="w-3.5 h-3.5 text-muted-foreground/70 flex-shrink-0" />
                 <div className="min-w-0 flex-1">
-                  <a href={att.url} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-foreground hover:text-primary truncate block">{att.name}</a>
+                  <a href={safeHref(att.url)} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-foreground hover:text-primary truncate block">{att.name}</a>
                   <p className="text-[10px] text-muted-foreground/70">{formatDate(att.uploadedAt)}</p>
                 </div>
               </div>

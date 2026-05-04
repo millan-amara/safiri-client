@@ -3,6 +3,15 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Compass, Eye, EyeOff } from 'lucide-react';
 import toast from 'react-hot-toast';
+import api from '../utils/api';
+
+const OAUTH_ERRORS = {
+  oauth_failed: 'Google login failed. Please try again.',
+  unverified_email: 'Your Google email is not verified. Verify it with Google and try again.',
+  verify_email_first: 'A local account with that email exists but is unverified. Verify the original account before linking Google.',
+  token_failed: 'Google login failed. Please try again.',
+  no_code: 'Google login failed. Please try again.',
+};
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -13,20 +22,31 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  // Handle Google OAuth callback token
+  // Handle Google OAuth callback. The server now returns a single-use exchange
+  // code (via ?oauth_code=) instead of the JWT itself, so the JWT never lands
+  // in the URL/history/Referer/access-logs.
   useEffect(() => {
-    const token = searchParams.get('token');
+    const code = searchParams.get('oauth_code');
     const error = searchParams.get('error');
-    if (token) {
-      localStorage.setItem('token', token);
-      toast.success('Welcome!');
-      navigate('/');
-      window.location.reload();
+    if (code) {
+      // Strip the code from the URL immediately so a back-button or refresh
+      // doesn't show it. Then exchange it for the real session token.
+      window.history.replaceState({}, '', window.location.pathname);
+      api.post('/auth/oauth-exchange', { code })
+        .then(({ data }) => {
+          localStorage.setItem('token', data.token);
+          toast.success('Welcome!');
+          navigate('/');
+          window.location.reload();
+        })
+        .catch(() => {
+          toast.error('Login link expired. Please try signing in again.');
+        });
     }
     if (error) {
-      toast.error('Google login failed. Please try again.');
+      toast.error(OAUTH_ERRORS[error] || 'Sign-in failed. Please try again.');
     }
-  }, [searchParams]);
+  }, [searchParams, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

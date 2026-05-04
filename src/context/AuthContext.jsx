@@ -43,7 +43,11 @@ export function AuthProvider({ children }) {
     return data;
   };
 
-  const logout = () => {
+  const logout = async () => {
+    // Tell the server to bump our tokenVersion so any other devices/copies
+    // of this JWT are invalidated immediately. Best-effort: even if the call
+    // fails (network/already-expired), we still clear local state.
+    try { await api.post('/auth/logout'); } catch { /* ignore */ }
     localStorage.removeItem('token');
     setUser(null);
     setOrganization(null);

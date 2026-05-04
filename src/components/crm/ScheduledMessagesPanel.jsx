@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { marked } from 'marked';
+import { renderMarkdownSafe } from '../../utils/sanitizeMarkdown';
 import api from '../../utils/api';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
@@ -8,8 +8,6 @@ import {
   Plus, Mail, Clock, Edit2, Trash2, CheckCircle2,
   AlertCircle, XCircle, AlertTriangle, Send,
 } from 'lucide-react';
-
-marked.use({ breaks: true, gfm: true });
 
 const STATUS_META = {
   scheduled: { label: 'Scheduled', icon: Clock, className: 'bg-blue-50 text-blue-700 border-blue-200' },
@@ -152,7 +150,7 @@ export default function ScheduledMessagesPanel({ deal }) {
                     {isOpen && msg.body && (
                       <div
                         className="mt-2 p-2 rounded-md bg-background border border-border text-xs text-foreground leading-relaxed prose prose-sm max-w-none"
-                        dangerouslySetInnerHTML={{ __html: marked.parse(msg.body) }}
+                        dangerouslySetInnerHTML={{ __html: renderMarkdownSafe(msg.body) }}
                       />
                     )}
                   </div>

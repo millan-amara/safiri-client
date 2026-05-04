@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { mealPlanLabels } from '../../utils/helpers';
+import { safeHref } from '../../utils/safeUrl';
 
 const HOTEL_TYPE_LABELS = {
   hotel: 'Hotel',
@@ -657,7 +658,7 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                           {day.heroImage.credit && (
                             <p className="text-[10px] text-stone-400 italic mb-3 -mt-2">
                               {day.heroImage.creditUrl ? (
-                                <a href={day.heroImage.creditUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">{day.heroImage.credit}</a>
+                                <a href={safeHref(day.heroImage.creditUrl)} target="_blank" rel="noopener noreferrer" className="hover:underline">{day.heroImage.credit}</a>
                               ) : day.heroImage.credit}
                             </p>
                           )}
@@ -1271,7 +1272,7 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
             {lightbox.images[lightbox.index]?.credit && (
               <p className="mt-1 text-[11px] text-white/50 italic text-center">
                 {lightbox.images[lightbox.index].creditUrl ? (
-                  <a href={lightbox.images[lightbox.index].creditUrl} target="_blank" rel="noopener noreferrer" className="hover:text-white/80 underline">{lightbox.images[lightbox.index].credit}</a>
+                  <a href={safeHref(lightbox.images[lightbox.index].creditUrl)} target="_blank" rel="noopener noreferrer" className="hover:text-white/80 underline">{lightbox.images[lightbox.index].credit}</a>
                 ) : lightbox.images[lightbox.index].credit}
               </p>
             )}

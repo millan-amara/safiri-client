@@ -754,13 +754,19 @@ export default function QuoteBuilderPage() {
               >
                 <Eye className="w-4 h-4" /> Share Link
               </button>
-              <a
-                href={`${import.meta.env.VITE_API_URL || '/api'}/pdf/${id}/pdf/download?token=${localStorage.getItem('token')}`}
-                rel="noopener noreferrer"
+              <button
+                onClick={async () => {
+                  try {
+                    const { downloadFile } = await import('../utils/api');
+                    await downloadFile(`/pdf/${id}/pdf/download`, `quote-${quote.quoteNumber || id}.pdf`);
+                  } catch (err) {
+                    toast.error('PDF download failed');
+                  }
+                }}
                 className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm font-medium text-muted-foreground hover:border-border transition-colors"
               >
                 <FileText className="w-4 h-4" /> PDF
-              </a>
+              </button>
               <button
                 onClick={async () => {
                   const name = prompt('Template name:', quote.title);
@@ -1383,7 +1389,9 @@ function AIPanel({ quote, setQuote, destinations }) {
       });
       setRouteResult(data);
     } catch (err) {
-      console.error('Route suggest error:', err?.response?.status, err?.response?.data, err?.message);
+      if (import.meta.env.DEV) {
+        console.error('Route suggest error:', err?.response?.status, err?.response?.data, err?.message);
+      }
       toast.error(err.response?.data?.message || err.message || 'Route suggestion failed');
     } finally {
       setSuggestingRoute(false);

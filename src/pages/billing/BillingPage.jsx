@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import api from '../../utils/api';
 import toast from 'react-hot-toast';
 import {
-  CreditCard, Sparkles, CheckCircle2, Clock, FileText, RefreshCw,
+  CreditCard, Sparkles, CheckCircle2, Clock, FileText, RefreshCw, Zap, FileScan,
 } from 'lucide-react';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -87,6 +87,14 @@ function planFeatures(p) {
   const credits = `${p.aiCredits.toLocaleString()} AI credits / month`;
   const features = [seats, quotes, credits];
 
+  // PDF rate-card pages (separate metered resource — see Chunk 4).
+  if (p.pdfPagesPerMonth != null) {
+    const pages = isUnlimited(p.pdfPagesPerMonth)
+      ? 'Unlimited PDF rate-card pages'
+      : `${p.pdfPagesPerMonth.toLocaleString()} PDF rate-card pages / month`;
+    features.push(pages);
+  }
+
   const caps = p.partnerCaps || {};
   const hotelsCap = isUnlimited(caps.hotel) ? 'Unlimited' : caps.hotel;
   const actsCap   = isUnlimited(caps.activity) ? 'Unlimited' : caps.activity;
@@ -111,9 +119,13 @@ export default function BillingPage() {
 
   const [billing, setBilling] = useState(null);
   const [plans, setPlans] = useState([]);
+  const [creditPacks, setCreditPacks] = useState([]);
+  const [pdfPagePacks, setPdfPagePacks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [annual, setAnnual] = useState(false);
   const [upgrading, setUpgrading] = useState(null);
+  const [buyingPack, setBuyingPack] = useState(null);
+  const [buyingPdfPack, setBuyingPdfPack] = useState(null);
   const [cancelling, setCancelling] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
 
@@ -125,6 +137,8 @@ export default function BillingPage() {
       ]);
       setBilling(billingData);
       setPlans(plansData.plans || []);
+      setCreditPacks(plansData.creditPacks || []);
+      setPdfPagePacks(plansData.pdfPagePacks || []);
     } catch {
       toast.error('Could not load billing information.');
     } finally {
@@ -138,10 +152,19 @@ export default function BillingPage() {
   useEffect(() => {
     const success = searchParams.get('success');
     const planParam = searchParams.get('plan');
+    const creditsParam = searchParams.get('credits');
     const error = searchParams.get('error');
 
     if (success === 'true') {
-      toast.success(planParam ? `Upgraded to ${planLabel(planParam)}! Welcome aboard.` : 'Payment successful!');
+      const pagesParam = searchParams.get('pages');
+      const msg = creditsParam
+        ? `Added ${Number(creditsParam).toLocaleString()} AI credits to your account.`
+        : pagesParam
+          ? `Added ${Number(pagesParam).toLocaleString()} PDF pages to your account.`
+          : planParam
+            ? `Upgraded to ${planLabel(planParam)}! Welcome aboard.`
+            : 'Payment successful!';
+      toast.success(msg);
       fetchAll();
       refreshOrganization();
     }
@@ -164,6 +187,28 @@ export default function BillingPage() {
     } catch (err) {
       toast.error(err.response?.data?.message || 'Could not start checkout. Please try again.');
       setUpgrading(null);
+    }
+  };
+
+  const handleBuyCredits = async (packKey) => {
+    setBuyingPack(packKey);
+    try {
+      const { data } = await api.post('/billing/buy-credits', { packKey });
+      window.location.href = data.authorizationUrl;
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not start checkout. Please try again.');
+      setBuyingPack(null);
+    }
+  };
+
+  const handleBuyPdfPages = async (packKey) => {
+    setBuyingPdfPack(packKey);
+    try {
+      const { data } = await api.post('/billing/buy-pdf-pages', { packKey });
+      window.location.href = data.authorizationUrl;
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not start checkout. Please try again.');
+      setBuyingPdfPack(null);
     }
   };
 
@@ -228,6 +273,9 @@ export default function BillingPage() {
   const {
     subscriptionStatus, plan, trialDaysLeft, trialQuotesLeft, currentPeriodEnd,
     aiCreditsUsed, aiCreditsLimit, aiCreditsResetAt,
+    purchasedCredits = 0,
+    pdfPagesUsed = 0, pdfPagesLimit = 0, pdfPagesResetAt,
+    purchasedPdfPages = 0,
     paystackSubscriptionCode, pendingPlan,
   } = billing;
 
@@ -288,13 +336,42 @@ export default function BillingPage() {
           </div>
         )}
 
-        <div className="pt-2 border-t border-border">
-          <UsageBar
-            used={aiCreditsUsed}
-            limit={aiCreditsLimit}
-            label="AI credits this month (heavy=10 · medium=3 · light=1)"
-            resetAt={aiCreditsResetAt}
-          />
+        <div className="pt-2 border-t border-border space-y-3">
+          <div className="space-y-1.5">
+            <UsageBar
+              used={aiCreditsUsed}
+              limit={aiCreditsLimit}
+              label="AI credits this month (heavy=50 · medium=5 · light=1)"
+              resetAt={aiCreditsResetAt}
+            />
+            {purchasedCredits > 0 && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Zap className="w-3.5 h-3.5 text-amber-500" />
+                <span>
+                  <span className="font-semibold text-foreground">{purchasedCredits.toLocaleString()}</span>{' '}
+                  purchased credits available — used after your monthly allowance is exhausted
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <UsageBar
+              used={pdfPagesUsed}
+              limit={pdfPagesLimit}
+              label="PDF rate-card pages this month (1 page per uploaded page)"
+              resetAt={pdfPagesResetAt}
+            />
+            {purchasedPdfPages > 0 && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <FileScan className="w-3.5 h-3.5 text-amber-500" />
+                <span>
+                  <span className="font-semibold text-foreground">{purchasedPdfPages.toLocaleString()}</span>{' '}
+                  purchased PDF pages available — used after your monthly allowance is exhausted
+                </span>
+              </div>
+            )}
+          </div>
         </div>
 
         {pendingPlan && (
@@ -358,6 +435,108 @@ export default function BillingPage() {
           </div>
         )}
       </div>
+
+      {/* Buy more credits — one-off top-ups that never expire and apply to
+          ALL plans, including trial. Shown unless the org is enterprise (custom
+          allotment) or has no plans loaded yet. */}
+      {plan !== 'enterprise' && creditPacks.length > 0 && (
+        <div>
+          <div className="flex items-baseline justify-between mb-2 gap-3">
+            <h2 className="text-base font-semibold text-foreground">Buy more AI credits</h2>
+            <p className="text-xs text-muted-foreground hidden sm:block">
+              One-off top-up · never expires · applies after your monthly allowance
+            </p>
+          </div>
+          <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">
+            {creditPacks.map((pack) => {
+              const perThousand = pack.priceKES / (pack.credits / 1000);
+              return (
+                <div
+                  key={pack.key}
+                  className="bg-card border border-border rounded-xl p-4 flex flex-col gap-3"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Zap className="w-4 h-4 text-amber-500" />
+                      <p className="font-semibold text-foreground">
+                        {pack.credits.toLocaleString()} credits
+                      </p>
+                    </div>
+                    <p className="text-2xl font-bold text-foreground mt-2">{fmtKes(pack.priceKES)}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      {fmtKes(Math.round(perThousand))} per 1,000 credits
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleBuyCredits(pack.key)}
+                    disabled={buyingPack === pack.key}
+                    className="w-full py-2 rounded-lg bg-muted hover:bg-muted/80 text-foreground text-sm font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+                  >
+                    {buyingPack === pack.key ? (
+                      <><RefreshCw className="w-4 h-4 animate-spin" /> Redirecting…</>
+                    ) : (
+                      <><CreditCard className="w-4 h-4" /> Buy</>
+                    )}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-2 sm:hidden">
+            One-off top-up · never expires · applies after your monthly allowance
+          </p>
+        </div>
+      )}
+
+      {/* Buy PDF page packs — for partner rate-card extraction overflow. */}
+      {plan !== 'enterprise' && pdfPagePacks.length > 0 && (
+        <div>
+          <div className="flex items-baseline justify-between mb-2 gap-3">
+            <h2 className="text-base font-semibold text-foreground">Buy more PDF rate-card pages</h2>
+            <p className="text-xs text-muted-foreground hidden sm:block">
+              For uploading partner rate cards · never expires
+            </p>
+          </div>
+          <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">
+            {pdfPagePacks.map((pack) => {
+              const perPage = pack.priceKES / pack.pages;
+              return (
+                <div
+                  key={pack.key}
+                  className="bg-card border border-border rounded-xl p-4 flex flex-col gap-3"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <FileScan className="w-4 h-4 text-amber-500" />
+                      <p className="font-semibold text-foreground">
+                        {pack.pages.toLocaleString()} pages
+                      </p>
+                    </div>
+                    <p className="text-2xl font-bold text-foreground mt-2">{fmtKes(pack.priceKES)}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      {fmtKes(Math.round(perPage))} per page
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleBuyPdfPages(pack.key)}
+                    disabled={buyingPdfPack === pack.key}
+                    className="w-full py-2 rounded-lg bg-muted hover:bg-muted/80 text-foreground text-sm font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+                  >
+                    {buyingPdfPack === pack.key ? (
+                      <><RefreshCw className="w-4 h-4 animate-spin" /> Redirecting…</>
+                    ) : (
+                      <><CreditCard className="w-4 h-4" /> Buy</>
+                    )}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-2 sm:hidden">
+            For uploading partner rate cards · never expires
+          </p>
+        </div>
+      )}
 
       {/* Plan picker */}
       {plan !== 'enterprise' && !pendingPlan && (

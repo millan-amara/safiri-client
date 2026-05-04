@@ -64,11 +64,17 @@ function show402Toast(code, serverMessage) {
   );
 }
 
+// Routes whose own 401 response should NOT trigger an auto-logout — sign-in,
+// sign-up, password reset, OAuth-code redemption are themselves auth flows
+// and we want their errors handled by the form, not by a redirect.
+const AUTH_ROUTE_PREFIXES = ['/auth/login', '/auth/register', '/auth/forgot-password', '/auth/reset-password', '/auth/oauth-exchange', '/auth/invite'];
+const isAuthRouteUrl = (url = '') => AUTH_ROUTE_PREFIXES.some(p => url.startsWith(p) || url.includes(p));
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error.response?.status;
-    const isAuthRoute = error.config?.url?.includes('/auth/');
+    const isAuthRoute = isAuthRouteUrl(error.config?.url);
 
     if (status === 401 && !isAuthRoute) {
       localStorage.removeItem('token');
@@ -84,5 +90,22 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// Authenticated file download. Uses the same Bearer header as the rest of the
+// app so the JWT never appears in the URL (which leaks via history, Referer,
+// and access logs). Triggers a browser save dialog with the chosen filename.
+export async function downloadFile(path, filename) {
+  const response = await api.get(path, { responseType: 'blob' });
+  const blob = response.data;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename || 'download';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoke async to give the browser a chance to start the download.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
 
 export default api;

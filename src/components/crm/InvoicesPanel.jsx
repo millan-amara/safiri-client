@@ -92,12 +92,13 @@ export default function InvoicesPanel({ deal }) {
     }
   };
 
-  const downloadPdf = (inv) => {
-    // Use the same base URL as the api client; pass token as query param so the
-    // protect middleware accepts it (no Authorization header on a window.open).
-    const token = localStorage.getItem('token');
-    const base = api.defaults.baseURL?.replace(/\/+$/, '') || '/api';
-    window.open(`${base}/invoices/${inv._id}/pdf?token=${encodeURIComponent(token || '')}`, '_blank');
+  const downloadPdf = async (inv) => {
+    try {
+      const { downloadFile } = await import('../../utils/api');
+      await downloadFile(`/invoices/${inv._id}/pdf`, `invoice-${inv.number || inv._id}.pdf`);
+    } catch (err) {
+      toast.error('PDF download failed');
+    }
   };
 
   // Sort: draft + sent first (actionable), then paid + cancelled.
