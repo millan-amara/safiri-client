@@ -20,6 +20,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
 import BillingPage from './pages/billing/BillingPage';
 import LibraryAdminPage from './pages/LibraryAdminPage';
+import AdminDashboardPage from './pages/AdminDashboardPage';
 import InvoicesPage from './pages/InvoicesPage';
 
 function ProtectedRoute({ children }) {
@@ -64,6 +65,7 @@ export default function App() {
         <Route path="automations" element={<AutomationsPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="settings/billing" element={<BillingPage />} />
+        <Route path="admin" element={<AdminDashboardPage />} />
         <Route path="admin/library" element={<LibraryAdminPage />} />
       </Route>
     </Routes>

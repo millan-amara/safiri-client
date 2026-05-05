@@ -24,6 +24,7 @@ import {
   User as UserIcon,
   Sparkles,
   Receipt,
+  ShieldCheck,
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 
@@ -35,6 +36,7 @@ const navItems = [
   { path: '/quotes', icon: FileText, label: 'Quotes' },
   { path: '/invoices', icon: Receipt, label: 'Invoices' },
   { path: '/automations', icon: Zap, label: 'Automations' },
+  { path: '/admin', icon: ShieldCheck, label: 'Operator', superAdminOnly: true, end: true },
   { path: '/admin/library', icon: ImageIcon, label: 'Image Library', superAdminOnly: true },
   { path: '/settings', icon: Settings, label: 'Settings' },
 ];
@@ -324,7 +326,10 @@ function MoreSheet({ user, logout, onClose, onOpenGettingStarted }) {
     { path: '/destinations', icon: MapPin, label: 'Destinations' },
     { path: '/invoices', icon: Receipt, label: 'Invoices' },
     { path: '/automations', icon: Zap, label: 'Automations' },
-    ...(user?.isSuperAdmin ? [{ path: '/admin/library', icon: ImageIcon, label: 'Image Library' }] : []),
+    ...(user?.isSuperAdmin ? [
+      { path: '/admin', icon: ShieldCheck, label: 'Operator' },
+      { path: '/admin/library', icon: ImageIcon, label: 'Image Library' },
+    ] : []),
     { path: '/settings', icon: Settings, label: 'Settings' },
   ];
 
