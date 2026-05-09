@@ -22,6 +22,36 @@ const RATE_ERROR_MESSAGES = {
 };
 const humanizeRateError = (code) => RATE_ERROR_MESSAGES[code] || `Pricing failed: ${code}`;
 
+// Snapshot of the inputs that drove a price call, stored on the item snapshot
+// so we can later detect when the quote header has drifted away from them.
+// Hotels depend on the check-in date; activities/transport don't.
+const hotelPricingInputs = (quote, dayIndex) => {
+  const checkIn = quote.startDate ? new Date(quote.startDate) : new Date();
+  checkIn.setDate(checkIn.getDate() + dayIndex);
+  return {
+    checkIn: checkIn.toISOString().slice(0, 10),
+    adults: quote.travelers.adults,
+    childAges: [...(quote.travelers.childAges || [])],
+    clientType: quote.clientType,
+    nationality: quote.nationality,
+    quoteCurrency: quote.pricing.currency,
+  };
+};
+const paxPricingInputs = (quote) => ({
+  adults: quote.travelers.adults,
+  children: quote.travelers.children,
+  childAges: [...(quote.travelers.childAges || [])],
+  quoteCurrency: quote.pricing.currency,
+});
+const inputsEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+// Snapshot is "stale" when its recorded inputs differ from the current ones.
+// Pre-existing snapshots without `pricingInputs` (legacy data, manual edits)
+// aren't flagged — we don't know what they were priced against.
+const isItemStale = (snap, current) => {
+  if (!snap?.pricingInputs) return false;
+  return !inputsEqual(snap.pricingInputs, current);
+};
+
 export default function QuoteBuilderPage() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
@@ -51,6 +81,9 @@ export default function QuoteBuilderPage() {
       currency: organization?.defaults?.currency || 'USD',
       displayMode: 'total_only',
       lineItems: [],
+      // Whether to mark up mandatory pass-through fees (park fees etc.).
+      // Toggle in the pricing sidebar — default mirrors the schema default.
+      markupPassThroughFees: true,
     },
     inclusions: organization?.defaults?.inclusions || [],
     exclusions: organization?.defaults?.exclusions || [],
@@ -237,8 +270,11 @@ export default function QuoteBuilderPage() {
         packageSnapshot,
         pricing: {
           ...quote.pricing,
+          // Replace lineItems wholesale — the package IS the itinerary, and
+          // any prior line items (including a previously-applied package's
+          // line) would otherwise stack and double the displayed total. If
+          // the operator has extras to bill, they add them after applying.
           lineItems: [
-            ...(quote.pricing.lineItems || []),
             {
               description: `${data.package?.name || pkg.name} — ${data.tier.minPax}-${data.tier.maxPax} pax package (${quote.travelers.adults} adult${quote.travelers.adults === 1 ? '' : 's'}${data.childAges.length ? ', ' + data.childAges.length + ' child' + (data.childAges.length === 1 ? '' : 'ren') : ''})`,
               quantity: 1,
@@ -323,9 +359,21 @@ export default function QuoteBuilderPage() {
     setLinkMode('deal');
   }, [id, deals, searchParams]);
 
-  // Recalculate pricing when days change — honors per-day margin overrides
+  // Recalculate pricing when days change — honors per-day margin overrides.
+  //
+  // Three buckets feed the total:
+  //   1. day.dayCost — operator-resold inventory (hotel rate, activities,
+  //      transport). Always marked up at the per-day or global margin.
+  //   2. mandatory pass-through fees on each day's hotel snapshot (park fees,
+  //      conservancy access). Marked up only if quote.pricing.markupPassThroughFees
+  //      is true; otherwise billed at face value. These were previously dropped
+  //      from the total entirely, under-pricing safari quotes by ~$80–120 / pax / night.
+  //   3. quote.pricing.lineItems — packages applied as a single line item,
+  //      manual extras. Marked up at the global margin (per-day overrides do
+  //      not apply because line items are not bound to a day).
   useEffect(() => {
     const globalMargin = quote.pricing.marginPercent;
+    const markupFees = quote.pricing.markupPassThroughFees !== false;
     let subtotal = 0;
     let totalPrice = 0;
     (quote.days || []).forEach(day => {
@@ -333,7 +381,19 @@ export default function QuoteBuilderPage() {
       const margin = day.marginOverride != null ? day.marginOverride : globalMargin;
       subtotal += cost;
       totalPrice += cost * (1 + margin / 100);
+
+      const ptTotal = (day.hotel?.passThroughFees || [])
+        .filter(f => f.mandatory !== false)
+        .reduce((s, f) => s + (f.amountInQuoteCurrency || 0), 0);
+      subtotal += ptTotal;
+      totalPrice += markupFees ? ptTotal * (1 + margin / 100) : ptTotal;
     });
+
+    const lineItemsTotal = (quote.pricing.lineItems || [])
+      .reduce((s, li) => s + (Number(li.total) || 0), 0);
+    subtotal += lineItemsTotal;
+    totalPrice += lineItemsTotal * (1 + globalMargin / 100);
+
     const marginAmount = totalPrice - subtotal;
     const totalPax = quote.travelers.adults + quote.travelers.children;
     setQuote(prev => ({
@@ -346,7 +406,7 @@ export default function QuoteBuilderPage() {
         perPersonPrice: totalPax > 0 ? Math.round(totalPrice / totalPax) : 0,
       },
     }));
-  }, [quote.days, quote.pricing.marginPercent, quote.travelers]);
+  }, [quote.days, quote.pricing.marginPercent, quote.pricing.markupPassThroughFees, quote.pricing.lineItems, quote.travelers]);
 
   // Day helpers
   const addDay = (afterIdx = null) => {
@@ -382,20 +442,29 @@ export default function QuoteBuilderPage() {
     setExpandedDay(afterIdx === null ? days.length - 1 : afterIdx + 1);
   };
 
+  // updates can be a plain object (replacement / atomic patch) or a function
+  // (prevDay => patch). Use the function form when the patch depends on the
+  // previous day state — e.g. appending an activity. Reading day.activities
+  // outside this functional form is a closure trap: rapid parallel picks both
+  // see the pre-await activities array and the second update clobbers the
+  // first. Same pattern that bit extendStayFromDay; centralised here.
   const updateDay = (index, updates) => {
-    const days = [...quote.days];
-    days[index] = { ...days[index], ...updates };
+    setQuote(prev => {
+      const days = [...prev.days];
+      const patch = typeof updates === 'function' ? updates(days[index]) : updates;
+      days[index] = { ...days[index], ...patch };
 
-    // Auto-calc day cost. Prefer the quote-currency value (converted via FX
-    // at pick time) over the raw source-currency value, so a USD quote with
-    // KES activities doesn't silently mix currencies in the total.
-    const day = days[index];
-    const hotelCost = day.hotel?.ratePerNightInQuoteCurrency || day.hotel?.ratePerNight || 0;
-    const actCost = day.activities?.reduce((s, a) => s + (a.totalCostInQuoteCurrency ?? a.totalCost ?? 0), 0) || 0;
-    const transCost = day.transport?.totalCostInQuoteCurrency ?? day.transport?.totalCost ?? 0;
-    days[index].dayCost = hotelCost + actCost + transCost;
+      // Auto-calc day cost. Prefer the quote-currency value (converted via FX
+      // at pick time) over the raw source-currency value, so a USD quote with
+      // KES activities doesn't silently mix currencies in the total.
+      const day = days[index];
+      const hotelCost = day.hotel?.ratePerNightInQuoteCurrency || day.hotel?.ratePerNight || 0;
+      const actCost = day.activities?.reduce((s, a) => s + (a.totalCostInQuoteCurrency ?? a.totalCost ?? 0), 0) || 0;
+      const transCost = day.transport?.totalCostInQuoteCurrency ?? day.transport?.totalCost ?? 0;
+      days[index].dayCost = hotelCost + actCost + transCost;
 
-    setQuote({ ...quote, days });
+      return { ...prev, days };
+    });
   };
 
   const removeDay = (index) => {
@@ -474,6 +543,18 @@ export default function QuoteBuilderPage() {
     const checkOut = new Date(checkIn);
     checkOut.setDate(checkOut.getDate() + 1);
 
+    // Snapshot the pricing inputs so the staleness banner can detect when the
+    // operator has shifted the quote header (dates / pax / clientType / etc.)
+    // since this hotel was priced.
+    const pricingInputs = {
+      checkIn: checkIn.toISOString().slice(0, 10),
+      adults: quote.travelers.adults,
+      childAges: [...(quote.travelers.childAges || [])],
+      clientType: quote.clientType,
+      nationality: quote.nationality,
+      quoteCurrency: quote.pricing.currency,
+    };
+
     const baseSnapshot = {
       hotelId: hotel._id,
       name: hotel.name,
@@ -487,6 +568,7 @@ export default function QuoteBuilderPage() {
       contactEmail: hotel.contactEmail || '',
       contactPhone: hotel.contactPhone || '',
       tags: hotel.tags || [],
+      pricingInputs,
     };
 
     try {
@@ -533,6 +615,10 @@ export default function QuoteBuilderPage() {
             rateListNotes: data.notes || '',
             inclusions: data.inclusions || [],
             exclusions: data.exclusions || [],
+            // Typed callouts the renderer will surface and the operator
+            // must acknowledge any blocking ones before sending the quote.
+            conditions: data.conditions || [],
+            extractionConfidence: data.extractionConfidence || data.rateList?.extractionConfidence || '',
             warnings: data.warnings,
           },
           roomType: data.roomType || '',
@@ -665,8 +751,12 @@ export default function QuoteBuilderPage() {
         totalCost: data.totalCost,
         totalCostInQuoteCurrency: data.totalCostInQuoteCurrency,
         warnings: data.warnings || [],
+        pricingInputs: paxPricingInputs(quote),
       };
-      updateDay(dayIndex, { activities: [...(day.activities || []), newAct] });
+      // Functional form: append against the latest day state so two parallel
+      // adds don't clobber each other (the closure-captured `day` is stale
+      // after the await).
+      updateDay(dayIndex, prev => ({ activities: [...(prev.activities || []), newAct] }));
       if (data.warnings?.length) {
         data.warnings.slice(0, 2).forEach(w => toast(w, { icon: '⚠️' }));
       }
@@ -674,13 +764,12 @@ export default function QuoteBuilderPage() {
       toast.error(err.response?.data?.message || 'Activity pricing failed');
       // Fall back to a zero-cost snapshot rather than silently miscalculating.
       const newAct = { ...baseSnapshot, totalCost: 0, totalCostInQuoteCurrency: 0 };
-      updateDay(dayIndex, { activities: [...(day.activities || []), newAct] });
+      updateDay(dayIndex, prev => ({ activities: [...(prev.activities || []), newAct] }));
     }
   };
 
   const removeActivityFromDay = (dayIndex, actIdx) => {
-    const day = quote.days[dayIndex];
-    updateDay(dayIndex, { activities: day.activities.filter((_, i) => i !== actIdx) });
+    updateDay(dayIndex, prev => ({ activities: (prev.activities || []).filter((_, i) => i !== actIdx) }));
   };
 
   // Pick a transport for a day. Server applies the pricingModel + FX. The
@@ -723,6 +812,7 @@ export default function QuoteBuilderPage() {
         totalCostInQuoteCurrency: data.totalCostInQuoteCurrency,
         days: data.days,
         warnings: data.warnings || [],
+        pricingInputs: paxPricingInputs(quote),
       };
       updateDay(dayIndex, { transport: snapshot });
       if (data.warnings?.length) {
@@ -739,27 +829,125 @@ export default function QuoteBuilderPage() {
   // In-place edit of free-text fields on the existing transport snapshot
   // (estimatedTime, notes). Doesn't re-call the server.
   const updateDayTransportField = (dayIndex, field, value) => {
-    const day = quote.days[dayIndex];
-    if (!day.transport) return;
-    updateDay(dayIndex, { transport: { ...day.transport, [field]: value } });
+    updateDay(dayIndex, prev => prev.transport ? { transport: { ...prev.transport, [field]: value } } : {});
   };
 
   // Image helpers — flexible gallery for each day
   const addImageToDay = (dayIndex, image) => {
-    const day = quote.days[dayIndex];
-    updateDay(dayIndex, { images: [...(day.images || []), image] });
+    updateDay(dayIndex, prev => ({ images: [...(prev.images || []), image] }));
   };
 
   const removeImageFromDay = (dayIndex, imgIdx) => {
-    const day = quote.days[dayIndex];
-    updateDay(dayIndex, { images: day.images.filter((_, i) => i !== imgIdx) });
+    updateDay(dayIndex, prev => ({ images: (prev.images || []).filter((_, i) => i !== imgIdx) }));
   };
 
   const setHeroImageForDay = (dayIndex, imgIdx) => {
-    const day = quote.days[dayIndex];
-    const images = [...day.images];
-    const [hero] = images.splice(imgIdx, 1);
-    updateDay(dayIndex, { images: [hero, ...images] });
+    updateDay(dayIndex, prev => {
+      const images = [...(prev.images || [])];
+      const [hero] = images.splice(imgIdx, 1);
+      return { images: [hero, ...images] };
+    });
+  };
+
+  // Count items whose stored pricingInputs no longer match the current header.
+  // Used to drive the global staleness banner.
+  const staleItemCount = (() => {
+    let n = 0;
+    const days = quote.days || [];
+    for (let i = 0; i < days.length; i++) {
+      const d = days[i];
+      if (isItemStale(d.hotel, hotelPricingInputs(quote, i))) n++;
+      const paxIn = paxPricingInputs(quote);
+      for (const a of (d.activities || [])) if (isItemStale(a, paxIn)) n++;
+      if (isItemStale(d.transport, paxIn)) n++;
+    }
+    return n;
+  })();
+
+  // Unacknowledged blocking conditions across the quote. Server enforces this
+  // on transition to status='sent', so the chip near Save & Send mirrors that
+  // gate. Operator clicks Acknowledge in the day card to clear each one.
+  const unacknowledgedBlockers = (() => {
+    const out = [];
+    (quote.days || []).forEach((d, i) => {
+      (d.hotel?.conditions || []).forEach((c, ci) => {
+        if (c.severity === 'blocking' && !c.acknowledged) {
+          out.push({ dayIndex: i, conditionIndex: ci, hotel: d.hotel?.name, text: c.text });
+        }
+      });
+    });
+    return out;
+  })();
+
+  const acknowledgeCondition = (dayIndex, conditionIndex) => {
+    updateDay(dayIndex, prev => {
+      const conditions = (prev.hotel?.conditions || []).map((c, i) => (
+        i === conditionIndex ? { ...c, acknowledged: true } : c
+      ));
+      return { hotel: { ...prev.hotel, conditions } };
+    });
+  };
+
+  // Re-run pricing for every hotel / activity / transport on the quote against
+  // the current header. Looks up the partner doc by id (snapshots only carry
+  // hotelId / activityId / transportId), so anything since deleted from
+  // inventory is skipped with a warning.
+  const [repricing, setRepricing] = useState(false);
+  const repriceAll = async () => {
+    setRepricing(true);
+    let priced = 0;
+    let missing = 0;
+    try {
+      const days = quote.days || [];
+      for (let i = 0; i < days.length; i++) {
+        const day = days[i];
+
+        if (day.hotel?.hotelId) {
+          const hotel = hotels.find(h => h._id === day.hotel.hotelId);
+          if (hotel) {
+            await selectHotelForDay(i, hotel, { preferredRoomType: day.hotel.roomType, preferredMealPlan: day.hotel.mealPlan });
+            priced++;
+          } else {
+            missing++;
+          }
+        }
+
+        if (day.transport?.transportId) {
+          const t = transport.find(x => x._id === day.transport.transportId);
+          if (t) {
+            await setTransportForDay(i, t, {
+              days: day.transport.days,
+              distanceKm: day.transport.distanceKm,
+              estimatedTime: day.transport.estimatedTime,
+            });
+            priced++;
+          } else {
+            missing++;
+          }
+        }
+
+        if (day.activities?.length) {
+          const ids = day.activities.map(a => a.activityId).filter(Boolean);
+          // Clear, then re-add each — addActivityToDay appends.
+          updateDay(i, { activities: [] });
+          for (const actId of ids) {
+            const act = activities.find(a => a._id === actId);
+            if (act) {
+              await addActivityToDay(i, act);
+              priced++;
+            } else {
+              missing++;
+            }
+          }
+        }
+      }
+      const tail = missing ? ` · ${missing} item${missing === 1 ? '' : 's'} no longer in inventory` : '';
+      toast.success(`Repriced ${priced} item${priced === 1 ? '' : 's'}${tail}`);
+    } catch (err) {
+      toast.error(`Reprice failed: ${err.response?.data?.message || err.message}`);
+    } finally {
+      setRepricing(false);
+    }
   };
 
   const handleSave = async (status) => {
@@ -879,8 +1067,21 @@ export default function QuoteBuilderPage() {
           <button onClick={() => handleSave('draft')} disabled={saving} className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-card border border-border text-sm font-medium text-foreground hover:border-border transition-colors disabled:opacity-50">
             <Save className="w-4 h-4" /> Save Draft
           </button>
-          <button onClick={() => handleSave('sent')} disabled={saving} className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary transition-colors disabled:opacity-50">
-            <Send className="w-4 h-4" /> Save & Send
+          <button
+            onClick={() => handleSave('sent')}
+            disabled={saving || unacknowledgedBlockers.length > 0}
+            title={unacknowledgedBlockers.length > 0
+              ? `${unacknowledgedBlockers.length} blocking condition${unacknowledgedBlockers.length === 1 ? '' : 's'} must be acknowledged before sending`
+              : ''}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Send className="w-4 h-4" />
+            Save & Send
+            {unacknowledgedBlockers.length > 0 && (
+              <span className="ml-1 inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-700 text-white">
+                {unacknowledgedBlockers.length}
+              </span>
+            )}
           </button>
         </div>
       </div>
@@ -1015,11 +1216,47 @@ export default function QuoteBuilderPage() {
                     type="number"
                     min={0}
                     value={quote.travelers.children}
-                    onChange={(e) => setQuote({ ...quote, travelers: { ...quote.travelers, children: parseInt(e.target.value) || 0 } })}
+                    onChange={(e) => {
+                      const n = Math.max(0, parseInt(e.target.value) || 0);
+                      // Keep childAges length in sync — preserve already-entered ages,
+                      // pad with the default-8 used elsewhere (matches the search
+                      // executor's DEFAULT_CHILD_AGE convention).
+                      const existing = quote.travelers.childAges || [];
+                      const ages = existing.slice(0, n);
+                      while (ages.length < n) ages.push(8);
+                      setQuote({ ...quote, travelers: { ...quote.travelers, children: n, childAges: ages } });
+                    }}
                     className="w-20 px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
                     placeholder="Kids"
                   />
                 </div>
+                {quote.travelers.children > 0 && (
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] text-muted-foreground">Ages:</span>
+                    {Array.from({ length: quote.travelers.children }).map((_, i) => (
+                      <input
+                        key={i}
+                        type="number"
+                        min={0}
+                        max={17}
+                        value={quote.travelers.childAges?.[i] ?? 8}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value);
+                          const age = Number.isFinite(v) ? Math.min(17, Math.max(0, v)) : 8;
+                          const ages = [...(quote.travelers.childAges || [])];
+                          while (ages.length < quote.travelers.children) ages.push(8);
+                          ages[i] = age;
+                          setQuote({ ...quote, travelers: { ...quote.travelers, childAges: ages } });
+                        }}
+                        className="w-12 px-2 py-1 rounded-md bg-background border border-border text-xs text-foreground focus:outline-none focus:border-primary"
+                        title={`Age of child ${i + 1}`}
+                      />
+                    ))}
+                    <span className="text-[10px] text-muted-foreground/60 ml-1">
+                      Drives child rate brackets and park-fee tiers.
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1160,6 +1397,32 @@ export default function QuoteBuilderPage() {
             </div>
           </div>
 
+          {/* Staleness banner — surfaces when header inputs (dates, pax,
+              clientType, nationality, currency) have drifted away from what
+              picks were priced against. Operator clicks Reprice to refresh
+              every hotel / activity / transport against the current header. */}
+          {staleItemCount > 0 && (
+            <div className="flex items-start gap-3 p-3 rounded-lg border border-amber-300 bg-amber-50 text-amber-900">
+              <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <div className="flex-1 text-sm">
+                <p className="font-medium">
+                  {staleItemCount} item{staleItemCount === 1 ? '' : 's'} priced for older trip settings
+                </p>
+                <p className="text-xs text-amber-800/80 mt-0.5">
+                  You changed dates, travelers, client type, nationality, or currency after picking. Reprice to refresh against the current header.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={repriceAll}
+                disabled={repricing}
+                className="text-xs font-semibold px-3 py-1.5 rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {repricing ? 'Repricing…' : 'Reprice all'}
+              </button>
+            </div>
+          )}
+
           {/* Timeline / Segments */}
           <div className="space-y-3">
             {/* Start point */}
@@ -1206,6 +1469,7 @@ export default function QuoteBuilderPage() {
                 onAddImage={(image) => addImageToDay(idx, image)}
                 onRemoveImage={(imgIdx) => removeImageFromDay(idx, imgIdx)}
                 onSetHero={(imgIdx) => setHeroImageForDay(idx, imgIdx)}
+                onAcknowledgeCondition={acknowledgeCondition}
               />
             ))}
 
@@ -1334,6 +1598,24 @@ export default function QuoteBuilderPage() {
                   <span>50%</span>
                 </div>
               </div>
+
+              <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer pt-1">
+                <input
+                  type="checkbox"
+                  checked={quote.pricing.markupPassThroughFees !== false}
+                  onChange={(e) => setQuote({
+                    ...quote,
+                    pricing: { ...quote.pricing, markupPassThroughFees: e.target.checked },
+                  })}
+                  className="mt-0.5 rounded border-border accent-[hsl(243_75%_59%)]"
+                />
+                <span className="leading-tight">
+                  Mark up park &amp; pass-through fees
+                  <span className="block text-muted-foreground/60 mt-0.5">
+                    Off = client pays park / conservancy fees at face value
+                  </span>
+                </span>
+              </label>
 
               <div className="border-t border-border pt-3">
                 <div className="flex justify-between text-sm">
@@ -2226,7 +2508,7 @@ function DayCard({
   hotels, activities, transport, destinations, currency, marginPercent,
   onSelectHotel, onExtendStay, onAddActivity, onRemoveActivity,
   onSelectTransport, onClearTransport, onUpdateTransportField,
-  onAddImage, onRemoveImage, onSetHero,
+  onAddImage, onRemoveImage, onSetHero, onAcknowledgeCondition,
 }) {
   const [showHotelPicker, setShowHotelPicker] = useState(false);
   const [showActivityPicker, setShowActivityPicker] = useState(false);
@@ -2439,6 +2721,48 @@ function DayCard({
                     </div>
                     <button onClick={() => setShowHotelPicker(true)} className="text-[10px] text-primary hover:underline">Change</button>
                   </div>
+
+                  {/* Conditions surfaced by the rate resolver — visa rules,
+                      blackout dates, group-size pricing, etc. Blocking ones
+                      must be acknowledged before the quote can be sent;
+                      warning / info levels are read-only callouts. */}
+                  {(day.hotel.conditions || []).length > 0 && (
+                    <div className="mt-2 space-y-1.5">
+                      {(day.hotel.conditions || []).map((c, ci) => {
+                        const sev = c.severity || 'info';
+                        const palette = sev === 'blocking'
+                          ? 'border-red-300 bg-red-50 text-red-900'
+                          : sev === 'warning'
+                          ? 'border-amber-300 bg-amber-50 text-amber-900'
+                          : 'border-stone-200 bg-stone-50 text-stone-800';
+                        return (
+                          <div key={ci} className={`flex items-start gap-2 p-2 rounded-md border text-[11px] ${palette}`}>
+                            <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium uppercase text-[9px] tracking-wide opacity-75">{sev}</p>
+                              <p className="leading-snug">{c.text || c.label || 'Condition applies'}</p>
+                            </div>
+                            {sev === 'blocking' && (
+                              c.acknowledged ? (
+                                <span className="text-[10px] font-semibold inline-flex items-center gap-0.5">
+                                  <CheckCircle className="w-3 h-3" /> Acked
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => onAcknowledgeCondition?.(index, ci)}
+                                  className="text-[10px] font-semibold px-2 py-0.5 rounded bg-red-600 text-white hover:bg-red-700"
+                                >
+                                  Acknowledge
+                                </button>
+                              )
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {/* Convenience: another night at the same hotel. Re-prices for the
                       next date so seasonal/stay-tier shifts are honoured (we don't
                       copy this snapshot's rate forward — that would be silently wrong). */}

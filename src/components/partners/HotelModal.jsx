@@ -34,6 +34,12 @@ export default function HotelModal({ hotel, onClose, onSaved }) {
   // on pending extracted items when the name matches something we already have.
   const [existingHotels, setExistingHotels] = useState([]);
   const [existingPackages, setExistingPackages] = useState([]);
+  // Field-level conflicts staged by the smarter merge endpoint when a 2nd
+  // PDF refines a stored value (e.g. policies doc updates a fee that the
+  // rate card already populated). The operator approves/rejects each in
+  // a diff modal before they're applied.
+  const [pendingUpdates, setPendingUpdates] = useState(hotel?.pendingUpdates || []);
+  const [showDiffModal, setShowDiffModal] = useState(false);
   const pdfInputRef = useRef(null);
 
   // Load matchable names on mount. Cheap — just names + ids.
@@ -366,6 +372,11 @@ export default function HotelModal({ hotel, onClose, onSaved }) {
   };
 
   // Merge one extracted hotel's rate lists into an existing hotel.
+  // The server now does a deep reconcile rather than name-skip dedupe — when a
+  // matching list exists, fields are filled-where-blank, conflicts go to
+  // pendingUpdates for operator review, conditions append. We surface
+  // a clear "X new lists, Y merged, Z conflicts to review" toast so the
+  // operator knows whether to open the diff modal next.
   const mergeExtractedHotelInto = async (existingId, idx) => {
     const d = pendingOtherHotels[idx];
     if (!d || !existingId) return;
@@ -375,18 +386,59 @@ export default function HotelModal({ hotel, onClose, onSaved }) {
         rateLists: normalizedLists,
         description: d.description || '',
         amenities: Array.isArray(d.amenities) ? d.amenities : [],
+        source: d._sourceFile || '',
       });
       const appended = (data.appendedListNames || []).length;
-      const skipped = normalizedLists.length - appended;
-      toast.success(
-        appended
-          ? `Merged ${appended} rate list(s) into "${d.name}"${skipped ? ` (${skipped} duplicate${skipped === 1 ? '' : 's'} skipped)` : ''}`
-          : `No new rate lists to add — "${d.name}" already has all ${normalizedLists.length}`
-      );
+      const merged = (data.mergedListNames || []).length;
+      const conflicts = (data.pendingUpdates || []).length;
+      const bits = [];
+      if (appended) bits.push(`${appended} new list${appended === 1 ? '' : 's'}`);
+      if (merged) bits.push(`${merged} list${merged === 1 ? '' : 's'} updated`);
+      if (conflicts) bits.push(`${conflicts} conflict${conflicts === 1 ? '' : 's'} to review`);
+      toast.success(bits.length ? bits.join(' · ') : `No changes — "${d.name}" already had all ${normalizedLists.length} list(s)`);
+
+      // If we just merged into the hotel WE'RE editing, sync the local
+      // pendingUpdates state so the diff banner appears immediately.
+      if (existingId === hotel?._id && Array.isArray(data.pendingUpdates) && data.pendingUpdates.length) {
+        setPendingUpdates(prev => [...(prev || []), ...data.pendingUpdates]);
+      }
+
       setPendingOtherHotels(prev => prev.filter((_, i) => i !== idx));
       onSaved?.();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Merge failed');
+    }
+  };
+
+  // Operator decision on a single pending update: 'accept' applies the new
+  // value; 'reject' keeps the old; 'defer' parks it. Server clears resolved
+  // entries from the queue. We update local state to match.
+  const decidePendingUpdate = async (updateId, decision) => {
+    if (!hotel?._id) return;
+    try {
+      const { data } = await api.put(`/partners/hotels/${hotel._id}/pending-updates/${updateId}`, { decision });
+      setPendingUpdates(data.hotel?.pendingUpdates || []);
+      // Re-pull the hotel into the form so accepted updates show in the rates tab.
+      if (decision === 'accept' && data.hotel) {
+        setForm(prev => ({
+          ...prev,
+          rateLists: data.hotel.rateLists || prev.rateLists,
+        }));
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not record decision');
+    }
+  };
+
+  const dismissAllPendingUpdates = async () => {
+    if (!hotel?._id) return;
+    if (!confirm('Discard all pending updates? They cannot be retrieved once dismissed.')) return;
+    try {
+      await api.delete(`/partners/hotels/${hotel._id}/pending-updates`);
+      setPendingUpdates([]);
+      toast.success('Pending updates cleared');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Clear failed');
     }
   };
 
@@ -479,6 +531,38 @@ export default function HotelModal({ hotel, onClose, onSaved }) {
   return (
     <Modal title={isEdit ? 'Edit Hotel' : 'Add Hotel'} onClose={onClose} xwide persistent>
       <form onSubmit={handleSubmit} className="space-y-4">
+        {pendingUpdates.length > 0 && (
+          <div className="rounded-lg border border-orange-300 bg-orange-50 p-3">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-orange-600 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-orange-900">
+                  {pendingUpdates.length} field conflict{pendingUpdates.length === 1 ? '' : 's'} from a recent PDF upload
+                </p>
+                <p className="text-[11px] text-orange-800/80 mt-0.5">
+                  A second document proposes different values for these fields. Accept to overwrite, reject to keep stored values, defer to decide later.
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <button type="button" onClick={() => setShowDiffModal(true)} className="px-3 py-1 rounded bg-orange-600 text-white text-[11px] font-medium hover:bg-orange-700">
+                    Review {pendingUpdates.length} change{pendingUpdates.length === 1 ? '' : 's'}
+                  </button>
+                  <button type="button" onClick={dismissAllPendingUpdates} className="px-3 py-1 rounded bg-white border border-orange-300 text-orange-700 text-[11px] font-medium hover:border-orange-400">
+                    Discard all
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showDiffModal && (
+          <PendingUpdatesModal
+            updates={pendingUpdates}
+            onDecide={decidePendingUpdate}
+            onClose={() => setShowDiffModal(false)}
+          />
+        )}
+
         {pendingPackages.length > 0 && (
           <div className="rounded-lg border border-purple-200 bg-purple-50 p-3">
             <div className="flex items-start gap-2">
@@ -854,11 +938,14 @@ function normalizeList(list) {
         triplePerPerson: Number(r.triplePerPerson) || 0,
         quadPerPerson: Number(r.quadPerPerson) || 0,
         singleSupplement: Number(r.singleSupplement) || 0,
+        tripleSupplementPct: Number(r.tripleSupplementPct) || 0,
+        quadSupplementPct: Number(r.quadSupplementPct) || 0,
         childBrackets: (r.childBrackets || []).map(b => ({
           ...b,
           minAge: Number(b.minAge) || 0,
           maxAge: Number(b.maxAge) || 17,
           value: Number(b.value) || 0,
+          position: ['any', 'first', 'second', 'third_plus'].includes(b.position) ? b.position : 'any',
         })),
         stayTiers: (r.stayTiers || []).map(t => ({
           minNights: Number(t.minNights) || 1,
@@ -899,9 +986,79 @@ function normalizeList(list) {
     cancellationTiers: (list.cancellationTiers || []).map(t => ({
       ...t,
       daysBefore: Number(t.daysBefore) || 0,
+      penaltyMode: ['pct', 'nights', 'flat'].includes(t.penaltyMode) ? t.penaltyMode : 'pct',
       penaltyPct: Number(t.penaltyPct) || 0,
+      penaltyNights: Number(t.penaltyNights) || 0,
+      penaltyAmount: Number(t.penaltyAmount) || 0,
     })),
     inclusions: Array.isArray(list.inclusions) ? list.inclusions.filter(Boolean) : [],
     exclusions: Array.isArray(list.exclusions) ? list.exclusions.filter(Boolean) : [],
+    conditions: (list.conditions || []).map(c => ({
+      ...c,
+      // Strip null/undefined when fields so Mongoose doesn't choke on default casts
+      when: Object.fromEntries(Object.entries(c.when || {}).filter(([, v]) => v !== null && v !== undefined && v !== '')),
+      effect: Object.fromEntries(Object.entries(c.effect || {}).filter(([, v]) => v !== null && v !== undefined && v !== '')),
+      severity: ['info', 'warning', 'blocking'].includes(c.severity) ? c.severity : 'warning',
+      scope: ['rate', 'fee', 'child', 'cancellation', 'addon', 'supplement', 'general'].includes(c.scope) ? c.scope : 'general',
+    })),
+    extractionConfidence: ['high', 'medium', 'low', ''].includes(list.extractionConfidence) ? list.extractionConfidence : '',
   };
+}
+
+// Diff approval modal. Walks the operator through staged conflicts one row
+// at a time so they can accept/reject/defer each. Old vs new shown side-by-
+// side; the field path tells the operator exactly where the value lives so
+// they can verify against the source PDFs without leaving this view.
+function PendingUpdatesModal({ updates, onDecide, onClose }) {
+  const fmt = (v) => {
+    if (v == null) return <span className="text-muted-foreground italic">—</span>;
+    if (typeof v === 'object') return <pre className="text-[10px] whitespace-pre-wrap leading-snug max-h-40 overflow-y-auto">{JSON.stringify(v, null, 2)}</pre>;
+    return String(v);
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-3xl max-h-[85vh] overflow-y-auto rounded-lg bg-background border border-border shadow-xl">
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 px-4 py-3 bg-background border-b border-border">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Review {updates.length} pending change{updates.length === 1 ? '' : 's'}</h3>
+            <p className="text-[11px] text-muted-foreground">A second PDF proposes different values for these fields. Choose per-field.</p>
+          </div>
+          <button type="button" onClick={onClose} className="p-1.5 rounded hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+        </div>
+
+        <div className="p-4 space-y-3">
+          {updates.length === 0 && (
+            <p className="text-sm text-center text-muted-foreground py-8">All resolved. You can close this modal.</p>
+          )}
+          {updates.map((u) => (
+            <div key={u._id} className="rounded-md border border-border bg-muted/20 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-mono text-foreground truncate">
+                    {u.rateListName ? `${u.rateListName} · ` : ''}{u.fieldPath}
+                  </p>
+                  {u.source && <p className="text-[10px] text-muted-foreground mt-0.5">From: {u.source}</p>}
+                </div>
+                <div className="shrink-0 flex gap-1">
+                  <button type="button" onClick={() => onDecide(u._id, 'accept')} className="px-2.5 py-1 rounded bg-green-600 text-white text-[11px] font-medium hover:bg-green-700">Accept new</button>
+                  <button type="button" onClick={() => onDecide(u._id, 'reject')} className="px-2.5 py-1 rounded bg-white border border-border text-foreground text-[11px] font-medium hover:bg-muted">Keep old</button>
+                  <button type="button" onClick={() => onDecide(u._id, 'defer')} className="px-2.5 py-1 rounded bg-white border border-border text-muted-foreground text-[11px] font-medium hover:bg-muted">Defer</button>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded border border-border bg-background p-2">
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1">Stored (old)</p>
+                  <div className="text-xs text-foreground">{fmt(u.oldValue)}</div>
+                </div>
+                <div className="rounded border border-primary/40 bg-primary/5 p-2">
+                  <p className="text-[10px] font-medium text-primary uppercase tracking-wide mb-1">Proposed (new)</p>
+                  <div className="text-xs text-foreground">{fmt(u.newValue)}</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }

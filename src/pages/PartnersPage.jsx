@@ -397,6 +397,7 @@
 
 
 import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../utils/api';
 import { formatCurrency, mealPlanLabels, seasonLabels, seasonColors } from '../utils/helpers';
 import toast from 'react-hot-toast';
@@ -424,6 +425,15 @@ const TABS = [
   { id: 'packages', label: 'Packages', icon: Map },
 ];
 
+// Map both singular (from /api/search results) and plural (tab ids) so deep
+// links from anywhere resolve to the same tab.
+const FOCUS_TYPE_TO_TAB = {
+  hotel: 'hotels', hotels: 'hotels',
+  activity: 'activities', activities: 'activities',
+  transport: 'transport',
+  package: 'packages', packages: 'packages',
+};
+
 export default function PartnersPage() {
   const [tab, setTab] = useState('hotels');
   const [data, setData] = useState({ hotels: [], transport: [], activities: [], packages: [] });
@@ -434,6 +444,8 @@ export default function PartnersPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [highlightId, setHighlightId] = useState(null);
+  const [searchParams, setSearchParams] = useSearchParams();
   const fileRef = useRef();
 
   const fetchData = async () => {
@@ -461,6 +473,37 @@ export default function PartnersPage() {
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  // Deep-link from the search palette (or any external link):
+  //   /partners?focus=<_id>&type=hotel|activity|transport|package
+  // Switches to the matching tab, clears the search filter so the row is
+  // guaranteed to render, scrolls into view, and rings the row for ~3s.
+  useEffect(() => {
+    const focus = searchParams.get('focus');
+    const type = searchParams.get('type');
+    if (!focus || !type || loading) return;
+
+    const targetTab = FOCUS_TYPE_TO_TAB[type];
+    if (!targetTab) return;
+
+    setTab(targetTab);
+    setSearch('');
+    setHighlightId(focus);
+
+    // Wait one frame so the tab content mounts before we measure / scroll.
+    requestAnimationFrame(() => {
+      const el = document.getElementById(`partner-${focus}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+
+    // Strip params + clear highlight after a beat. Strip via replace so the
+    // back button doesn't ping-pong the user back into the focused state.
+    const t = setTimeout(() => {
+      setHighlightId(null);
+      setSearchParams({}, { replace: true });
+    }, 3000);
+    return () => clearTimeout(t);
+  }, [searchParams, loading, setSearchParams]);
 
   const handleImport = async (e) => {
     const file = e.target.files[0];
@@ -649,7 +692,13 @@ export default function PartnersPage() {
                     </div>
                     <div className="grid gap-3">
                       {hotels.map((hotel) => (
-                        <HotelCard key={hotel._id} hotel={hotel} onDelete={handleDelete} onEdit={(h) => { setEditItem(h); setShowAddModal(true); }} />
+                        <div
+                          key={hotel._id}
+                          id={`partner-${hotel._id}`}
+                          className={`rounded-xl transition-shadow ${highlightId === hotel._id ? 'ring-2 ring-primary ring-offset-2' : ''}`}
+                        >
+                          <HotelCard hotel={hotel} onDelete={handleDelete} onEdit={(h) => { setEditItem(h); setShowAddModal(true); }} />
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -664,7 +713,11 @@ export default function PartnersPage() {
               {filtered.transport.length === 0 ? (
                 <EmptyState icon={Truck} title="No transport" description="Import or add transport options" />
               ) : filtered.transport.map((t) => (
-                <div key={t._id} className="bg-card rounded-xl border border-border p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 group hover:border-border transition-colors">
+                <div
+                  key={t._id}
+                  id={`partner-${t._id}`}
+                  className={`bg-card rounded-xl border border-border p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 group hover:border-border transition-shadow ${highlightId === t._id ? 'ring-2 ring-primary ring-offset-2' : ''}`}
+                >
                   <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
                     <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
                       <Truck className="w-5 h-5" />
@@ -701,7 +754,11 @@ export default function PartnersPage() {
               {filtered.activities.length === 0 ? (
                 <EmptyState icon={Ticket} title="No activities" description="Import or add activities" />
               ) : filtered.activities.map((a) => (
-                <div key={a._id} className="bg-card rounded-xl border border-border p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 group hover:border-border transition-colors">
+                <div
+                  key={a._id}
+                  id={`partner-${a._id}`}
+                  className={`bg-card rounded-xl border border-border p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 group hover:border-border transition-shadow ${highlightId === a._id ? 'ring-2 ring-primary ring-offset-2' : ''}`}
+                >
                   <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
                     <div className="w-10 h-10 rounded-lg bg-green-50 text-green-600 flex items-center justify-center shrink-0">
                       <Ticket className="w-5 h-5" />
@@ -754,7 +811,11 @@ export default function PartnersPage() {
                 }
                 const audienceTags = Array.from(new Set(allLists.flatMap(l => l.audience || [])));
                 return (
-                  <div key={p._id} className="bg-card rounded-xl border border-border p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 group hover:border-border transition-colors">
+                  <div
+                    key={p._id}
+                    id={`partner-${p._id}`}
+                    className={`bg-card rounded-xl border border-border p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 group hover:border-border transition-shadow ${highlightId === p._id ? 'ring-2 ring-primary ring-offset-2' : ''}`}
+                  >
                     <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
                       <div className="w-10 h-10 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
                         <Map className="w-5 h-5" />

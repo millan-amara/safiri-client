@@ -14,6 +14,14 @@ const HOTEL_TYPE_LABELS = {
 };
 const formatHotelType = (t) => HOTEL_TYPE_LABELS[t] || (t ? t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '');
 
+// Pick the hero-flagged image, falling back to the first. Hotel/activity image
+// arrays come from the partner doc unaltered, so isHero must be honored — only
+// day-level arrays are physically reordered when the operator promotes a hero.
+const pickHero = (images) => {
+  if (!Array.isArray(images) || !images.length) return null;
+  return images.find(i => i?.isHero) || images[0];
+};
+
 // Render N filled + (5-N) empty stars in the brand color. Returns null if no
 // rating set so callers can short-circuit.
 function StarRating({ stars, color, size = 12 }) {
@@ -162,10 +170,33 @@ function collectFees(days) {
   return rows;
 }
 
+// Format a cancellation tier penalty for display, honoring penaltyMode.
+// 'pct'    → "30%"
+// 'nights' → "1 night (≈ $X)" using effectiveAmount when present
+// 'flat'   → "USD 250"
+function formatPenalty(t, currency) {
+  const mode = t.penaltyMode || 'pct';
+  if (mode === 'nights') {
+    const n = t.penaltyNights || 0;
+    const eff = t.effectiveAmountInQuoteCurrency || t.effectiveAmount || 0;
+    const tail = eff ? ` (≈ ${currency} ${Math.round(eff).toLocaleString()})` : '';
+    return `${n} night${n === 1 ? '' : 's'}${tail}`;
+  }
+  if (mode === 'flat') {
+    // penaltyAmount / effectiveAmount are both in the rate list's source
+    // currency. The label says `currency` (the quote currency), so prefer
+    // the converted value when present and fall back to the source value
+    // only when there's no converted figure (then both labels match).
+    const a = t.effectiveAmountInQuoteCurrency || t.penaltyAmount || t.effectiveAmount || 0;
+    return `${currency} ${Math.round(a).toLocaleString()}`;
+  }
+  return `${t.penaltyPct || 0}%`;
+}
+
 // Pull deposit + cancellation tiers + booking terms from the package (when
 // the quote was built from one) and from each unique hotel snapshot. Deposit
 // returns the highest % across sources (worst case for the client). Tiers
-// dedupe by (daysBefore, penaltyPct). Booking terms collected per source.
+// dedupe by (daysBefore, mode, value). Booking terms collected per source.
 function collectPolicy(quote) {
   let depositPct = 0;
   const tierMap = new Map();
@@ -175,7 +206,9 @@ function collectPolicy(quote) {
     if (!source) return;
     if ((source.depositPct || 0) > depositPct) depositPct = source.depositPct;
     for (const t of (source.cancellationTiers || [])) {
-      const key = `${t.daysBefore}|${t.penaltyPct}`;
+      const mode = t.penaltyMode || 'pct';
+      const val = mode === 'nights' ? t.penaltyNights : mode === 'flat' ? t.penaltyAmount : t.penaltyPct;
+      const key = `${t.daysBefore}|${mode}|${val}`;
       if (!tierMap.has(key)) tierMap.set(key, { ...t, sources: [name] });
       else if (!tierMap.get(key).sources.includes(name)) tierMap.get(key).sources.push(name);
     }
@@ -195,6 +228,27 @@ function collectPolicy(quote) {
   // Sort tiers by daysBefore descending — least restrictive first.
   const cancellationTiers = Array.from(tierMap.values()).sort((a, b) => (b.daysBefore || 0) - (a.daysBefore || 0));
   return { depositPct, cancellationTiers, bookingTerms };
+}
+
+// Collect every active condition from every hotel that appears in the quote,
+// grouped by hotel for callout rendering. We dedup by `text` so the same
+// condition emitted for two stays at the same property doesn't duplicate.
+function collectConditions(quote) {
+  const byHotel = new Map();
+  const seen = new Set();
+  for (const d of (quote.days || [])) {
+    const h = d.hotel;
+    if (!h?.name) continue;
+    for (const c of (h.conditions || [])) {
+      const key = `${h.name}::${(c.text || '').toLowerCase().trim()}`;
+      if (!c.text || seen.has(key)) continue;
+      seen.add(key);
+      const arr = byHotel.get(h.name) || [];
+      arr.push(c);
+      byHotel.set(h.name, arr);
+    }
+  }
+  return Array.from(byHotel.entries()).map(([hotelName, items]) => ({ hotelName, items }));
 }
 
 // Format an add-on unit code into a human label.
@@ -289,7 +343,11 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
   const isDraft = quote.status === 'draft';
   const style = STYLE_PRESETS[quote.pdfStyle] || STYLE_PRESETS.editorial;
   const coverLayout = quote.coverLayout || 'full_bleed';
-  const coverImg = quote.coverImage?.url || quote.days?.find(d => d.images?.[0]?.url)?.images?.[0]?.url || quote.days?.find(d => d.hotel?.images?.[0]?.url)?.hotel?.images?.[0]?.url || '';
+  const dayWithHotelHero = quote.days?.find(d => pickHero(d.hotel?.images)?.url);
+  const coverImg = quote.coverImage?.url
+    || quote.days?.find(d => d.images?.[0]?.url)?.images?.[0]?.url
+    || pickHero(dayWithHotelHero?.hotel?.images)?.url
+    || '';
 
   // Inject the chosen font stylesheet once on mount
   useEffect(() => {
@@ -328,7 +386,7 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
         name: a.name,
         description: a.description || '',
         duration: a.duration || 0,
-        image: a.images?.[0] || null,
+        image: pickHero(a.images),
       })),
       mealPlan: d.hotel?.mealPlan,
       meals: d.meals,
@@ -415,6 +473,7 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
   // hotel snapshots and the package snapshot when present.
   const tripFees = collectFees(quote.days);
   const tripPolicy = collectPolicy(quote);
+  const tripConditions = collectConditions(quote);
   const tripAddOns = collectAddOns(quote.days);
 
   const quickFacts = [
@@ -752,9 +811,9 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                           {day.hotel.description && (
                             <p className="text-xs text-stone-500 mt-2 leading-relaxed line-clamp-4">{day.hotel.description}</p>
                           )}
-                          {day.hotel.images?.[0]?.url && (
+                          {pickHero(day.hotel.images)?.url && (
                             <div className="mt-3" style={photoWrap}>
-                              <img src={day.hotel.images[0].url} alt={day.hotel.name} className="w-full h-28 object-cover block" />
+                              <img src={pickHero(day.hotel.images).url} alt={day.hotel.name} className="w-full h-28 object-cover block" />
                             </div>
                           )}
                           {(day.hotel.inclusions?.length > 0) && (day.hotel.inclusionsDisplay || 'day') === 'day' && (
@@ -829,9 +888,9 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {uniqueHotels.map((hotel, i) => (
               <div key={i} className="border border-stone-200 bg-white" style={photoWrap}>
-                {hotel.images?.[0]?.url && (
+                {pickHero(hotel.images)?.url && (
                   <div className="h-48 bg-stone-100 overflow-hidden">
-                    <img src={hotel.images[0].url} alt={hotel.name} className="w-full h-full object-cover" />
+                    <img src={pickHero(hotel.images).url} alt={hotel.name} className="w-full h-full object-cover" />
                   </div>
                 )}
                 <div className="p-5">
@@ -1047,7 +1106,7 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
       )}
 
       {/* ─── PAYMENT TERMS BLOCK ───────────────────── */}
-      {blockEnabled('payment_terms') && (quote.paymentTerms || tripPolicy.depositPct > 0 || tripPolicy.cancellationTiers.length > 0 || tripPolicy.bookingTerms.length > 0) && (
+      {blockEnabled('payment_terms') && (quote.paymentTerms || tripPolicy.depositPct > 0 || tripPolicy.cancellationTiers.length > 0 || tripPolicy.bookingTerms.length > 0 || tripConditions.length > 0) && (
         <section className="max-w-5xl mx-auto px-6 pb-16">
           <div className="p-6 rounded-2xl bg-stone-50 border border-stone-200 space-y-5">
             <div>
@@ -1094,12 +1153,49 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                                 ({t.sources.join(', ')})
                               </span>
                             )}
+                            {t.notes && (
+                              <span className="text-[10px] text-stone-400 ml-2">— {t.notes}</span>
+                            )}
                           </td>
-                          <td className="py-2 px-3 text-right text-stone-700 font-semibold">{t.penaltyPct}%</td>
+                          <td className="py-2 px-3 text-right text-stone-700 font-semibold">
+                            {formatPenalty(t, quote.pricing?.currency || quote.currency || 'USD')}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                </div>
+              </div>
+            )}
+
+            {tripConditions.length > 0 && (
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-stone-400 mb-2">
+                  Conditions & Notes
+                </p>
+                <div className="space-y-3">
+                  {tripConditions.map(({ hotelName, items }, i) => (
+                    <div key={i}>
+                      <p className="text-[11px] text-stone-400 italic mb-0.5">{hotelName}</p>
+                      <ul className="space-y-1.5">
+                        {items.map((c, j) => {
+                          const cls = c.severity === 'blocking'
+                            ? 'border-red-300 bg-red-50 text-red-900'
+                            : c.severity === 'warning'
+                              ? 'border-amber-300 bg-amber-50 text-amber-900'
+                              : 'border-stone-300 bg-stone-50 text-stone-700';
+                          return (
+                            <li key={j} className={`flex items-start gap-2 px-3 py-1.5 rounded border ${cls}`}>
+                              <span className="text-[10px] font-semibold uppercase tracking-wide shrink-0 mt-0.5">
+                                {c.severity || 'info'}
+                              </span>
+                              <span className="text-sm">{c.text}</span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -1179,7 +1275,7 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
             <div className="mt-10 flex justify-center">
               <div className="max-w-xl w-full bg-white border border-stone-200 rounded-2xl p-6 sm:p-8 text-center" style={{ borderRadius: style.photoRadius }}>
                 <p className="text-sm text-stone-600 italic leading-relaxed mb-5">
-                  {quote.signatureNote || quote.closingNote || `It would be a privilege to bring this journey to life for you. I'm here to answer any questions and tailor anything you'd like to adjust.`}
+                  {quote.createdBy?.signatureNote || quote.closingNote || `It would be a privilege to bring this journey to life for you. I'm here to answer any questions and tailor anything you'd like to adjust.`}
                 </p>
                 {quote.createdBy.signature ? (
                   <img src={quote.createdBy.signature} alt="signature" className="h-12 object-contain mx-auto mb-3" />

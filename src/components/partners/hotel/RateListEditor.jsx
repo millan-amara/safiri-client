@@ -88,6 +88,8 @@ function emptyList() {
     depositPct: 30,
     bookingTerms: '',
     notes: '',
+    conditions: [],
+    extractionConfidence: '',
     isActive: true,
   };
 }
@@ -135,6 +137,21 @@ export default function RateListEditor({ list, index, onChange, onRemove, onDupl
           <span className="px-1.5 py-0.5 rounded text-[10px] bg-muted text-muted-foreground">{list.currency}</span>
           <span className="px-1.5 py-0.5 rounded text-[10px] bg-muted text-muted-foreground">{list.mealPlan}</span>
           {list.priority > 0 && <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-700">P{list.priority}</span>}
+          {list.extractionConfidence === 'low' && (
+            <span className="px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700 border border-red-200" title="Extraction was uncertain — review every field before sending a quote that uses this list.">
+              ⚠ Low confidence
+            </span>
+          )}
+          {list.extractionConfidence === 'medium' && (
+            <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-700" title="Extraction had some ambiguity — spot-check before quoting.">
+              Medium confidence
+            </span>
+          )}
+          {(list.conditions || []).some(c => c.severity === 'blocking' && !c.acknowledged) && (
+            <span className="px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700 border border-red-200" title="A blocking condition is unacknowledged — quotes using this list cannot be sent.">
+              ⛔ Action needed
+            </span>
+          )}
           <button type="button" onClick={onDuplicate} title="Duplicate" className="p-1 rounded hover:bg-muted text-muted-foreground">
             <Copy className="w-3.5 h-3.5" />
           </button>
@@ -215,6 +232,7 @@ export default function RateListEditor({ list, index, onChange, onRemove, onDupl
               { id: 'addons', label: `Add-ons (${list.addOns?.length || 0})` },
               { id: 'fees', label: `Pass-through Fees (${list.passThroughFees?.length || 0})` },
               { id: 'terms', label: `Inclusions & Terms${(list.inclusions?.length || list.exclusions?.length) ? ` (${(list.inclusions?.length || 0) + (list.exclusions?.length || 0)})` : ''}` },
+              { id: 'conditions', label: `Conditions (${list.conditions?.length || 0})` },
             ].map(t => (
               <button
                 key={t.id}
@@ -254,8 +272,191 @@ export default function RateListEditor({ list, index, onChange, onRemove, onDupl
           {tab === 'terms' && (
             <TermsTab list={list} update={update} />
           )}
+          {tab === 'conditions' && (
+            <ConditionsTab list={list} update={update} />
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── CONDITIONS TAB ─────────────────────────────────────────────────────
+// Surfaces typed callouts the renderer must show and the resolver may
+// auto-apply. A condition has a human-readable `text` (always required),
+// optional structured `when` (matcher) and `effect` (auto-apply target),
+// `severity` (info/warning/blocking), and an `acknowledged` flag the
+// operator toggles after reviewing. Blocking + unacknowledged stops the
+// quote from being sent.
+function ConditionsTab({ list, update }) {
+  const conditions = list.conditions || [];
+  const updateCond = (idx, patch) => update({
+    conditions: conditions.map((c, i) => i === idx ? { ...c, ...patch } : c),
+  });
+  const updateWhen = (idx, patch) => updateCond(idx, {
+    when: { ...(conditions[idx].when || {}), ...patch },
+  });
+  const updateEffect = (idx, patch) => updateCond(idx, {
+    effect: { ...(conditions[idx].effect || {}), ...patch },
+  });
+  const addCond = () => update({
+    conditions: [
+      ...conditions,
+      {
+        scope: 'general',
+        attachTo: '',
+        when: {},
+        effect: {},
+        text: '',
+        severity: 'warning',
+        source: '',
+        extractedAt: new Date().toISOString(),
+        acknowledged: false,
+      },
+    ],
+  });
+  const removeCond = (idx) => update({
+    conditions: conditions.filter((_, i) => i !== idx),
+  });
+
+  const sevBadge = (sev) => {
+    if (sev === 'blocking') return 'bg-red-100 text-red-700 border-red-200';
+    if (sev === 'warning') return 'bg-amber-100 text-amber-700 border-amber-200';
+    return 'bg-blue-100 text-blue-700 border-blue-200';
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-[11px] text-muted-foreground/80 leading-relaxed">
+          Conditions surface rules that don't fit a typed field — group-size pricing, minimum-stay rules, restrictions. The quote renderer shows each as a callout; <span className="font-medium text-foreground">blocking</span> conditions stop send-quote until acknowledged.
+        </p>
+        <button type="button" onClick={addCond} className="shrink-0 text-[11px] text-primary hover:underline inline-flex items-center gap-1">
+          <Plus className="w-3 h-3" /> Add condition
+        </button>
+      </div>
+
+      {conditions.length === 0 && (
+        <div className="rounded-md border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
+          No conditions yet. PDF extraction populates this automatically when a document carries conditional rules.
+        </div>
+      )}
+
+      {conditions.map((c, i) => (
+        <div key={i} className="rounded-md border border-border bg-background p-3 space-y-2">
+          <div className="flex items-start gap-2">
+            <span className={`shrink-0 px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide border ${sevBadge(c.severity)}`}>
+              {c.severity || 'warning'}
+            </span>
+            <input
+              type="text"
+              value={c.text || ''}
+              onChange={e => updateCond(i, { text: e.target.value })}
+              placeholder="Human-readable rule (always shown to operator)"
+              className="flex-1 px-2 py-1 rounded-md border border-border bg-background text-sm text-foreground focus:outline-none focus:border-primary"
+            />
+            <button type="button" onClick={() => removeCond(i)} className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-500">
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div>
+              <label className={label}>Scope</label>
+              <select value={c.scope || 'general'} onChange={e => updateCond(i, { scope: e.target.value })} className={input}>
+                <option value="general">General</option>
+                <option value="rate">Rate</option>
+                <option value="fee">Pass-through fee</option>
+                <option value="child">Child policy</option>
+                <option value="cancellation">Cancellation</option>
+                <option value="addon">Add-on</option>
+                <option value="supplement">Supplement</option>
+              </select>
+            </div>
+            <div>
+              <label className={label}>Severity</label>
+              <select value={c.severity || 'warning'} onChange={e => updateCond(i, { severity: e.target.value })} className={input}>
+                <option value="info">Info</option>
+                <option value="warning">Warning</option>
+                <option value="blocking">Blocking</option>
+              </select>
+            </div>
+            <div>
+              <label className={label}>Attach to (name)</label>
+              <input type="text" value={c.attachTo || ''} onChange={e => updateCond(i, { attachTo: e.target.value })} className={input} placeholder="e.g. Mara Reserve Fee" />
+            </div>
+            <div>
+              <label className={label}>Source</label>
+              <input type="text" value={c.source || ''} onChange={e => updateCond(i, { source: e.target.value })} className={input} placeholder="policies-2026.pdf" />
+            </div>
+          </div>
+
+          <details className="rounded border border-border/60 bg-muted/20 p-2">
+            <summary className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide cursor-pointer">
+              When to apply (matcher)
+            </summary>
+            <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div>
+                <label className={label}>Min Pax</label>
+                <input type="number" value={c.when?.minPax ?? ''} onChange={e => updateWhen(i, { minPax: e.target.value === '' ? null : parseInt(e.target.value) })} className={input} />
+              </div>
+              <div>
+                <label className={label}>Max Pax</label>
+                <input type="number" value={c.when?.maxPax ?? ''} onChange={e => updateWhen(i, { maxPax: e.target.value === '' ? null : parseInt(e.target.value) })} className={input} />
+              </div>
+              <div>
+                <label className={label}>Min Nights</label>
+                <input type="number" value={c.when?.minNights ?? ''} onChange={e => updateWhen(i, { minNights: e.target.value === '' ? null : parseInt(e.target.value) })} className={input} />
+              </div>
+              <div>
+                <label className={label}>Max Nights</label>
+                <input type="number" value={c.when?.maxNights ?? ''} onChange={e => updateWhen(i, { maxNights: e.target.value === '' ? null : parseInt(e.target.value) })} className={input} />
+              </div>
+              <div className="sm:col-span-2">
+                <label className={label}>Nationality</label>
+                <select value={c.when?.nationality || ''} onChange={e => updateWhen(i, { nationality: e.target.value })} className={input}>
+                  <option value="">Any</option>
+                  <option value="citizen">Citizen</option>
+                  <option value="resident">Resident</option>
+                  <option value="nonResident">Non-resident</option>
+                </select>
+              </div>
+              <div className="sm:col-span-2">
+                <label className={label}>Room types (comma-sep)</label>
+                <input type="text" value={(c.when?.roomTypes || []).join(', ')} onChange={e => updateWhen(i, { roomTypes: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} className={input} placeholder="Standard, Deluxe" />
+              </div>
+            </div>
+          </details>
+
+          <details className="rounded border border-border/60 bg-muted/20 p-2">
+            <summary className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide cursor-pointer">
+              Auto-apply (effect)
+            </summary>
+            <p className="text-[10px] text-muted-foreground/70 mt-1.5">
+              Optional. If set, the resolver auto-applies this when the matcher fires (non-blocking severity only). Leave blank for callout-only conditions.
+            </p>
+            <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <div className="sm:col-span-2">
+                <label className={label}>Field path</label>
+                <input type="text" value={c.effect?.field || ''} onChange={e => updateEffect(i, { field: e.target.value })} className={input} placeholder="passThroughFees[Mara].flatAmount" />
+              </div>
+              <div>
+                <label className={label}>New value</label>
+                <input type="number" value={c.effect?.value ?? ''} onChange={e => updateEffect(i, { value: e.target.value === '' ? null : parseFloat(e.target.value) })} className={input} />
+              </div>
+              <div>
+                <label className={label}>% delta</label>
+                <input type="number" value={c.effect?.percentDelta ?? ''} onChange={e => updateEffect(i, { percentDelta: e.target.value === '' ? null : parseFloat(e.target.value) })} className={input} placeholder="-15" />
+              </div>
+            </div>
+          </details>
+
+          <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+            <input type="checkbox" checked={!!c.acknowledged} onChange={e => updateCond(i, { acknowledged: e.target.checked })} />
+            <span>Acknowledged{c.severity === 'blocking' ? ' (required to send quote)' : ''}</span>
+          </label>
+        </div>
+      ))}
     </div>
   );
 }
@@ -469,7 +670,7 @@ function RoomPricingEditor({ room, currency, onChange, onRemove, canRemove }) {
   const addChild = () => onChange({
     childBrackets: [
       ...(room.childBrackets || []),
-      { label: '', minAge: 0, maxAge: 17, mode: 'pct', value: 50, sharingRule: 'sharing_with_adults' },
+      { label: '', minAge: 0, maxAge: 17, mode: 'pct', value: 50, sharingRule: 'sharing_with_adults', position: 'any' },
     ],
   });
   const removeChild = (idx) => onChange({
@@ -527,10 +728,18 @@ function RoomPricingEditor({ room, currency, onChange, onRemove, canRemove }) {
           <input type="number" value={room.quadPerPerson} onChange={e => onChange({ quadPerPerson: parseFloat(e.target.value) || 0 })} className={input} />
         </div>
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
         <div>
           <label className={label}>Single Supplement</label>
           <input type="number" value={room.singleSupplement} onChange={e => onChange({ singleSupplement: parseFloat(e.target.value) || 0 })} className={input} />
+        </div>
+        <div>
+          <label className={label} title="Use ONLY when the PDF gives a percentage instead of a per-person triple price (e.g. 'Triple Supplement 100%'). Resolver computes triple = perPersonSharing × (1 + pct/100). Leave 0 when an explicit triple per-person value is set above.">Triple Supp %</label>
+          <input type="number" value={room.tripleSupplementPct || 0} onChange={e => onChange({ tripleSupplementPct: parseFloat(e.target.value) || 0 })} className={input} />
+        </div>
+        <div>
+          <label className={label} title="Use ONLY when the PDF gives a percentage instead of a per-person quad price (e.g. 'Quad Supplement 80%').">Quad Supp %</label>
+          <input type="number" value={room.quadSupplementPct || 0} onChange={e => onChange({ quadSupplementPct: parseFloat(e.target.value) || 0 })} className={input} />
         </div>
         <div className="sm:col-span-2">
           <label className={label}>Notes</label>
@@ -551,7 +760,7 @@ function RoomPricingEditor({ room, currency, onChange, onRemove, canRemove }) {
         {childOpen && (
           <div className="mt-2 space-y-1.5">
             {(room.childBrackets || []).map((b, i) => (
-              <div key={i} className="grid grid-cols-2 sm:grid-cols-7 gap-1.5 items-end">
+              <div key={i} className="grid grid-cols-2 sm:grid-cols-8 gap-1.5 items-end">
                 <div>
                   <label className={label}>Label</label>
                   <input type="text" value={b.label} onChange={e => updateChild(i, { label: e.target.value })} className={input} placeholder="0–3 / 4–11" />
@@ -582,6 +791,15 @@ function RoomPricingEditor({ room, currency, onChange, onRemove, canRemove }) {
                     <option value="sharing_with_adults">Shares</option>
                     <option value="own_room">Own room</option>
                     <option value="any">Any</option>
+                  </select>
+                </div>
+                <div>
+                  <label className={label} title="For PDFs that distinguish 1st child / 2nd child rates. 'Any' (default) preserves age-only matching.">Position</label>
+                  <select value={b.position || 'any'} onChange={e => updateChild(i, { position: e.target.value })} className={input}>
+                    <option value="any">Any</option>
+                    <option value="first">1st child</option>
+                    <option value="second">2nd child</option>
+                    <option value="third_plus">3rd+</option>
                   </select>
                 </div>
                 <button type="button" onClick={() => removeChild(i)} className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-500">
@@ -941,7 +1159,14 @@ function TermsTab({ list, update }) {
     cancellationTiers: list.cancellationTiers.map((t, idx) => idx === i ? { ...t, ...patch } : t),
   });
   const addTier = () => update({
-    cancellationTiers: [...(list.cancellationTiers || []), { daysBefore: 30, penaltyPct: 50, notes: '' }],
+    cancellationTiers: [...(list.cancellationTiers || []), {
+      daysBefore: 30,
+      penaltyMode: 'pct',
+      penaltyPct: 50,
+      penaltyNights: 0,
+      penaltyAmount: 0,
+      notes: '',
+    }],
   });
   const removeTier = (i) => update({ cancellationTiers: list.cancellationTiers.filter((_, idx) => idx !== i) });
 
@@ -984,25 +1209,38 @@ function TermsTab({ list, update }) {
             <Plus className="w-3 h-3" /> Add tier
           </button>
         </div>
-        {(list.cancellationTiers || []).map((t, i) => (
-          <div key={i} className="grid grid-cols-1 md:grid-cols-12 gap-2 mb-1.5">
-            <div className="md:col-span-3">
-              <label className={label}>Days before arrival</label>
-              <input type="number" value={t.daysBefore} onChange={e => updateTier(i, { daysBefore: parseInt(e.target.value) || 0 })} className={input} />
+        {(list.cancellationTiers || []).map((t, i) => {
+          const mode = t.penaltyMode || 'pct';
+          const valueLabel = mode === 'pct' ? 'Penalty %' : mode === 'nights' ? 'Nights' : `Amount (${list.currency})`;
+          const valueField = mode === 'pct' ? 'penaltyPct' : mode === 'nights' ? 'penaltyNights' : 'penaltyAmount';
+          return (
+            <div key={i} className="grid grid-cols-1 md:grid-cols-12 gap-2 mb-1.5">
+              <div className="md:col-span-2">
+                <label className={label}>Days before</label>
+                <input type="number" value={t.daysBefore} onChange={e => updateTier(i, { daysBefore: parseInt(e.target.value) || 0 })} className={input} />
+              </div>
+              <div className="md:col-span-2">
+                <label className={label}>Mode</label>
+                <select value={mode} onChange={e => updateTier(i, { penaltyMode: e.target.value })} className={input}>
+                  <option value="pct">% of total</option>
+                  <option value="nights">Nights</option>
+                  <option value="flat">Flat amount</option>
+                </select>
+              </div>
+              <div className="md:col-span-2">
+                <label className={label}>{valueLabel}</label>
+                <input type="number" value={t[valueField] || 0} onChange={e => updateTier(i, { [valueField]: parseFloat(e.target.value) || 0 })} className={input} />
+              </div>
+              <div className="md:col-span-5">
+                <label className={label}>Notes</label>
+                <input type="text" value={t.notes || ''} onChange={e => updateTier(i, { notes: e.target.value })} className={input} placeholder={mode === 'nights' ? 'e.g. low/mid season — high/peak charges 4 nights' : ''} />
+              </div>
+              <div className="md:col-span-1 flex items-end justify-end">
+                <button type="button" onClick={() => removeTier(i)} className="p-1.5 rounded hover:bg-red-50 text-muted-foreground hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
+              </div>
             </div>
-            <div className="md:col-span-2">
-              <label className={label}>Penalty %</label>
-              <input type="number" value={t.penaltyPct} onChange={e => updateTier(i, { penaltyPct: parseInt(e.target.value) || 0 })} className={input} />
-            </div>
-            <div className="md:col-span-6">
-              <label className={label}>Notes</label>
-              <input type="text" value={t.notes || ''} onChange={e => updateTier(i, { notes: e.target.value })} className={input} />
-            </div>
-            <div className="md:col-span-1 flex items-end justify-end">
-              <button type="button" onClick={() => removeTier(i)} className="p-1.5 rounded hover:bg-red-50 text-muted-foreground hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div>

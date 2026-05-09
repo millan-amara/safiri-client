@@ -1,0 +1,316 @@
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Search, X, Loader2, Sparkles, MapPin, Calendar, Users, Wallet, Tag, Globe } from 'lucide-react';
+import api from '../../utils/api';
+import SearchResultCard from './SearchResultCard';
+
+const EXAMPLES = [
+  'tented camp in Maasai Mara for 2 adults',
+  'lodge Amboseli July budget $5000 USD',
+  'game drive activity in Mara',
+  '4x4 transfer Nairobi to Maasai Mara',
+];
+
+function formatDateRange(range) {
+  if (!range?.from && !range?.to) return null;
+  const fmt = (s) => {
+    if (!s) return '';
+    const d = new Date(s);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+  if (range.from && range.to) return `${fmt(range.from)} → ${fmt(range.to)}`;
+  return fmt(range.from || range.to);
+}
+
+function ParsedChip({ icon: Icon, children }) {
+  return (
+    <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-brand/10 text-amber-brand">
+      <Icon className="w-3 h-3" />
+      {children}
+    </span>
+  );
+}
+
+const NATIONALITY_LABELS = { citizen: 'citizen', resident: 'resident', nonResident: 'non-resident' };
+
+function ParsedSummary({ parsed, quoteCurrency }) {
+  if (!parsed) return null;
+  const dateLabel = formatDateRange(parsed.dateRange);
+  const paxLabel = parsed.adults || parsed.children?.length
+    ? `${parsed.adults || 0} adult${parsed.adults === 1 ? '' : 's'}${parsed.children?.length ? `, ${parsed.children.length} child${parsed.children.length === 1 ? '' : 'ren'}` : ''}`
+    : null;
+  const budgetLabel = parsed.budgetMax
+    ? `≤ ${new Intl.NumberFormat('en-US', { style: 'currency', currency: parsed.currency || quoteCurrency || 'USD', maximumFractionDigits: 0 }).format(parsed.budgetMax)}`
+    : null;
+  const clientTypeLabel = parsed.clientType ? `${parsed.clientType} rate` : null;
+  const nationalityLabel = parsed.nationality ? NATIONALITY_LABELS[parsed.nationality] : null;
+
+  if (!parsed.destinationName && !dateLabel && !paxLabel && !budgetLabel && !clientTypeLabel && !nationalityLabel && !parsed.mustHave?.length) {
+    return null;
+  }
+
+  return (
+    <div className="px-4 py-2 border-b border-sand-100 flex flex-wrap gap-1.5 items-center">
+      <span className="text-[10px] uppercase tracking-wide text-sand-500 font-semibold mr-1">Understood as</span>
+      {parsed.type && (
+        <span className="inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-brand/10 text-slate-brand capitalize">
+          {parsed.type}
+        </span>
+      )}
+      {parsed.destinationName && <ParsedChip icon={MapPin}>{parsed.destinationName}</ParsedChip>}
+      {dateLabel && <ParsedChip icon={Calendar}>{dateLabel}</ParsedChip>}
+      {paxLabel && <ParsedChip icon={Users}>{paxLabel}</ParsedChip>}
+      {clientTypeLabel && <ParsedChip icon={Tag}>{clientTypeLabel}</ParsedChip>}
+      {nationalityLabel && <ParsedChip icon={Globe}>{nationalityLabel}</ParsedChip>}
+      {budgetLabel && <ParsedChip icon={Wallet}>{budgetLabel}</ParsedChip>}
+      {parsed.mustHave?.map((t, i) => (
+        <span key={i} className="inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full bg-sand-100 text-sand-700">
+          {t}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+export default function SearchPalette({ open, onClose }) {
+  const [query, setQuery] = useState('');
+  const [response, setResponse] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [rationalesLoading, setRationalesLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const inputRef = useRef(null);
+  const navigate = useNavigate();
+  const reqIdRef = useRef(0);
+
+  // Reset state every time the palette opens.
+  useEffect(() => {
+    if (open) {
+      setQuery('');
+      setResponse(null);
+      setError(null);
+      setLoading(false);
+      setRationalesLoading(false);
+      setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  }, [open]);
+
+  // Esc to close.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  // Debounced search. The reqId guards against an earlier-but-slower response
+  // overwriting a later result if the user typed faster than the network.
+  useEffect(() => {
+    if (!open) return;
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setResponse(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    const myId = ++reqIdRef.current;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.post('/search', { query: trimmed });
+        if (myId !== reqIdRef.current) return;
+        setResponse(res.data);
+      } catch (err) {
+        if (myId !== reqIdRef.current) return;
+        // 402 paywall is already toasted by the global axios interceptor.
+        if (err.response?.status !== 402) {
+          setError(err.response?.data?.message || 'Search failed.');
+        }
+        setResponse(null);
+      } finally {
+        if (myId === reqIdRef.current) setLoading(false);
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [query, open]);
+
+  // After the main search returns results, fetch one-line rationales for the
+  // top 3. Reference-equality on the results array guards against a stale
+  // rationale landing on top of a newer search.
+  useEffect(() => {
+    if (!open) return;
+    if (!response?.results?.length) return;
+    if (response.rationales) return; // already attached
+
+    const capturedResults = response.results;
+    const top = capturedResults.slice(0, 3);
+    setRationalesLoading(true);
+
+    (async () => {
+      try {
+        const res = await api.post('/search/rationale', {
+          query: query.trim(),
+          parsed: response.parsed,
+          results: top,
+        });
+        setResponse(prev =>
+          prev?.results === capturedResults
+            ? { ...prev, rationales: res.data?.rationales || [] }
+            : prev
+        );
+      } catch (err) {
+        // Rationale is enhancement, not core. 402/500 fail silently — the
+        // global axios interceptor already toasts paywall errors.
+        setResponse(prev =>
+          prev?.results === capturedResults
+            ? { ...prev, rationales: [] }
+            : prev
+        );
+      } finally {
+        setRationalesLoading(false);
+      }
+    })();
+  }, [response, open, query]);
+
+  if (!open) return null;
+
+  const handleSelect = (result) => {
+    onClose();
+    // PartnersPage reads ?focus=<id>&type=<type>, switches to the right tab,
+    // clears the search filter, scrolls to the row, and rings it for ~3s.
+    navigate(`/partners?focus=${encodeURIComponent(result.id)}&type=${result.type}`);
+  };
+
+  const showExamples = !query.trim() && !loading;
+  const hasResults = response?.results?.length > 0;
+  const noResults = response && !response.needsClarification && response.results?.length === 0;
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-start justify-center pt-[10vh] px-4 bg-black/40 animate-fade-in"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl flex flex-col max-h-[80vh] overflow-hidden animate-scale-in"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Input */}
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-sand-200">
+          <Search className="w-4 h-4 text-sand-500 flex-shrink-0" />
+          <input
+            ref={inputRef}
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Ask about your hotels, activities, transport, packages…"
+            className="flex-1 bg-transparent outline-none text-sm text-slate-brand placeholder:text-sand-400"
+          />
+          {loading && <Loader2 className="w-4 h-4 text-sand-500 animate-spin flex-shrink-0" />}
+          <kbd className="hidden sm:inline-flex text-[10px] font-mono px-1.5 py-0.5 rounded bg-sand-100 text-sand-600 border border-sand-200">
+            esc
+          </kbd>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 rounded-md text-sand-500 hover:text-slate-brand hover:bg-sand-100"
+            aria-label="Close"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Parsed summary chips */}
+        <ParsedSummary parsed={response?.parsed} quoteCurrency={response?.quoteCurrency} />
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto">
+          {/* Examples */}
+          {showExamples && (
+            <div className="px-4 py-6">
+              <div className="flex items-center gap-2 mb-3">
+                <Sparkles className="w-4 h-4 text-amber-brand" />
+                <span className="text-xs font-semibold text-slate-brand uppercase tracking-wide">Try asking</span>
+              </div>
+              <div className="space-y-1.5">
+                {EXAMPLES.map((ex) => (
+                  <button
+                    key={ex}
+                    type="button"
+                    onClick={() => setQuery(ex)}
+                    className="block w-full text-left text-sm text-sand-700 hover:text-slate-brand hover:bg-sand-50 px-3 py-2 rounded-lg transition-colors"
+                  >
+                    {ex}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-4 text-[11px] text-sand-500">
+                Costs 1 AI credit per search. Pricing is computed from your own rate lists — no AI guesses.
+              </p>
+            </div>
+          )}
+
+          {/* Clarification */}
+          {response?.needsClarification && (
+            <div className="px-4 py-6 text-center">
+              <div className="inline-flex w-10 h-10 rounded-full bg-amber-brand/10 text-amber-brand items-center justify-center mb-3">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <p className="text-sm text-slate-brand font-medium mb-1">Need a bit more</p>
+              <p className="text-xs text-sand-600">{response.needsClarification.prompt}</p>
+            </div>
+          )}
+
+          {/* Error */}
+          {error && (
+            <div className="px-4 py-6 text-center text-sm text-red-600">{error}</div>
+          )}
+
+          {/* Results */}
+          {hasResults && (
+            <div>
+              {(() => {
+                const rationaleById = new Map(
+                  (response.rationales || []).map(r => [String(r.id), r.rationale])
+                );
+                return response.results.map((r, i) => (
+                  <SearchResultCard
+                    key={`${r.type}-${r.id}`}
+                    result={r}
+                    onSelect={handleSelect}
+                    rationale={rationaleById.get(String(r.id)) || null}
+                    rationaleLoading={i < 3 && rationalesLoading}
+                  />
+                ));
+              })()}
+            </div>
+          )}
+
+          {/* No results */}
+          {noResults && !loading && (
+            <div className="px-4 py-10 text-center">
+              <p className="text-sm font-medium text-slate-brand mb-1">No matches</p>
+              <p className="text-xs text-sand-600 max-w-sm mx-auto">
+                {response.warnings?.length
+                  ? response.warnings[0]
+                  : 'Try a different destination, widen the date range, or relax the budget. You can also add new partners on the Partners page.'}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        {(hasResults || response?.warnings?.length > 0) && (
+          <div className="px-4 py-2 border-t border-sand-200 flex items-center justify-between text-[11px] text-sand-500">
+            <span>
+              {hasResults
+                ? `${response.results.length} result${response.results.length === 1 ? '' : 's'} · sorted by price`
+                : null}
+            </span>
+            <span>↵ open · esc close</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

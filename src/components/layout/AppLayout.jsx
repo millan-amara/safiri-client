@@ -25,8 +25,10 @@ import {
   Sparkles,
   Receipt,
   ShieldCheck,
+  Search,
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
+import SearchPalette from '../search/SearchPalette';
 
 const navItems = [
   { path: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
@@ -55,6 +57,23 @@ export default function AppLayout() {
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  // Global ⌘K / Ctrl+K opens the natural-language partner palette. Skip when
+  // the user is typing in an input/textarea/contenteditable so we don't steal
+  // legitimate keystrokes (Cmd+K is also "clear terminal" in some inputs).
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'k') return;
+      const t = e.target;
+      const tag = t?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || t?.isContentEditable) return;
+      e.preventDefault();
+      setSearchOpen(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   // Reopens the dashboard onboarding checklist even if the user previously dismissed it.
   // Fire-and-forget the server reset so the navigation isn't blocked on the API.
@@ -105,6 +124,24 @@ export default function AppLayout() {
 
         {/* Nav */}
         <nav className="flex-1 py-4 px-3 space-y-1">
+          {/* Search palette trigger (⌘K) */}
+          <button
+            onClick={() => setSearchOpen(true)}
+            className={`
+              w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
+              text-sand-600 hover:text-slate-brand hover:bg-sand-100 transition-all duration-150
+              ${collapsed ? 'justify-center' : ''}
+            `}
+            title="Search inventory (⌘K)"
+          >
+            <Search className="w-[18px] h-[18px] flex-shrink-0" />
+            {!collapsed && (
+              <>
+                <span className="flex-1 text-left">Search</span>
+                <kbd className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white text-sand-500 border border-sand-200">⌘K</kbd>
+              </>
+            )}
+          </button>
           {navItems.filter(item => !item.superAdminOnly || user?.isSuperAdmin).map(({ path, icon: Icon, label, end }) => (
             <NavLink
               key={path}
@@ -181,6 +218,7 @@ export default function AppLayout() {
           user={user}
           logout={logout}
           pageLabel={currentPageLabel}
+          onOpenSearch={() => setSearchOpen(true)}
         />
 
         <ReadOnlyBanner />
@@ -206,11 +244,14 @@ export default function AppLayout() {
           onOpenGettingStarted={() => { setMoreOpen(false); openGettingStarted(); }}
         />
       )}
+
+      {/* Natural-language partner search palette (⌘K) */}
+      <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
   );
 }
 
-function MobileTopBar({ organization, user, logout, pageLabel }) {
+function MobileTopBar({ organization, user, logout, pageLabel, onOpenSearch }) {
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef(null);
 
@@ -242,6 +283,13 @@ function MobileTopBar({ organization, user, logout, pageLabel }) {
       </div>
 
       <div className="flex items-center gap-1">
+        <button
+          onClick={onOpenSearch}
+          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          aria-label="Search inventory"
+        >
+          <Search className="w-5 h-5" />
+        </button>
         <NotificationBell variant="topbar" />
 
         <div ref={profileRef} className="relative">
