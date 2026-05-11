@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, X, Loader2, Sparkles, MapPin, Calendar, Users, Wallet, Tag, Globe } from 'lucide-react';
+import { Search, X, Loader2, Sparkles, MapPin, Calendar, Users, Wallet, Tag, Globe, ArrowRight, Image as ImageIcon } from 'lucide-react';
 import api from '../../utils/api';
 import SearchResultCard from './SearchResultCard';
 
@@ -68,6 +68,65 @@ function ParsedSummary({ parsed, quoteCurrency }) {
           {t}
         </span>
       ))}
+    </div>
+  );
+}
+
+const TOPIC_LABELS = {
+  cancellation_policy: 'Cancellation policy',
+  child_policy: 'Child policy',
+  inclusions: 'Inclusions',
+  exclusions: 'Exclusions',
+  fees: 'Fees & levies',
+  rates: 'Rates',
+  rooms: 'Rooms',
+  amenities: 'Amenities',
+  general: 'Overview',
+};
+
+function LookupAnswer({ lookup, answer, onView }) {
+  return (
+    <div className="px-5 py-5">
+      {/* Partner header */}
+      <div className="flex items-start gap-3">
+        <div className="w-12 h-12 rounded-lg bg-sand-100 overflow-hidden flex-shrink-0 flex items-center justify-center">
+          {lookup.image
+            ? <img src={lookup.image} alt="" className="w-full h-full object-cover" />
+            : <ImageIcon className="w-5 h-5 text-sand-400" />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-slate-brand truncate">{lookup.name}</div>
+          <div className="text-[11px] text-sand-500 truncate capitalize">
+            {lookup.kind}
+            {lookup.destination ? ` · ${lookup.destination}` : ''}
+            {lookup.location ? ` · ${lookup.location}` : ''}
+          </div>
+        </div>
+        <span className="inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-brand/10 text-amber-brand whitespace-nowrap">
+          {TOPIC_LABELS[lookup.topic] || 'Overview'}
+        </span>
+      </div>
+
+      {/* Answer body — derived from operator's own data, never hallucinated. */}
+      {answer ? (
+        <div className="mt-4 flex items-start gap-2">
+          <Sparkles className="w-3.5 h-3.5 text-amber-brand mt-1 flex-shrink-0" />
+          <p className="text-sm text-slate-brand leading-relaxed whitespace-pre-wrap">{answer}</p>
+        </div>
+      ) : (
+        <p className="mt-4 text-xs text-sand-500 italic">
+          Couldn't generate an answer right now. Open the partner to view the underlying data directly.
+        </p>
+      )}
+
+      {/* Action — deep-link to PartnersPage so the operator can verify. */}
+      <button
+        type="button"
+        onClick={onView}
+        className="mt-4 inline-flex items-center gap-1 text-xs font-medium text-amber-brand hover:underline"
+      >
+        View partner <ArrowRight className="w-3 h-3" />
+      </button>
     </div>
   );
 }
@@ -182,9 +241,12 @@ export default function SearchPalette({ open, onClose }) {
     navigate(`/partners?focus=${encodeURIComponent(result.id)}&type=${result.type}`);
   };
 
+  const isLookup = response?.intent === 'lookup';
+  const hasLookupAnswer = isLookup && response.lookup;
+  const hasLookupCandidates = isLookup && response.candidates?.length > 0;
   const showExamples = !query.trim() && !loading;
-  const hasResults = response?.results?.length > 0;
-  const noResults = response && !response.needsClarification && response.results?.length === 0;
+  const hasResults = !isLookup && response?.results?.length > 0;
+  const noResults = !isLookup && response && !response.needsClarification && response.results?.length === 0;
 
   return (
     <div
@@ -220,8 +282,8 @@ export default function SearchPalette({ open, onClose }) {
           </button>
         </div>
 
-        {/* Parsed summary chips */}
-        <ParsedSummary parsed={response?.parsed} quoteCurrency={response?.quoteCurrency} />
+        {/* Parsed summary chips — search intent only. Lookup mode has its own header. */}
+        {!isLookup && <ParsedSummary parsed={response?.parsed} quoteCurrency={response?.quoteCurrency} />}
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto">
@@ -247,6 +309,57 @@ export default function SearchPalette({ open, onClose }) {
               <p className="mt-4 text-[11px] text-sand-500">
                 Costs 1 AI credit per search. Pricing is computed from your own rate lists — no AI guesses.
               </p>
+            </div>
+          )}
+
+          {/* Lookup answer — single-partner Q&A response */}
+          {hasLookupAnswer && (
+            <LookupAnswer
+              lookup={response.lookup}
+              answer={response.answer}
+              onView={() => handleSelect({ id: response.lookup.id, type: response.lookup.kind })}
+            />
+          )}
+
+          {/* Lookup disambiguation — multiple matches for the named subject */}
+          {hasLookupCandidates && (
+            <div className="px-4 py-5">
+              <p className="text-xs font-semibold text-slate-brand uppercase tracking-wide mb-2">Which one?</p>
+              <p className="text-xs text-sand-600 mb-3">
+                Multiple partners match "{response.parsed?.subjectName}". Pick one to get the answer.
+              </p>
+              <div className="space-y-1">
+                {response.candidates.map((c) => (
+                  <button
+                    key={`${c.kind}-${c.id}`}
+                    type="button"
+                    onClick={() => {
+                      // Re-issue the same query but with the canonical name so
+                      // the parser resolves to a single subject this time.
+                      const subj = response.parsed?.subjectName;
+                      if (subj && query.toLowerCase().includes(subj.toLowerCase())) {
+                        const re = new RegExp(subj.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+                        setQuery(query.replace(re, c.name));
+                      } else {
+                        setQuery(`${query} (${c.name})`);
+                      }
+                    }}
+                    className="w-full flex items-center gap-3 text-left px-3 py-2 rounded-lg hover:bg-sand-50 transition-colors"
+                  >
+                    <div className="w-8 h-8 rounded bg-sand-100 overflow-hidden flex-shrink-0 flex items-center justify-center">
+                      {c.image
+                        ? <img src={c.image} alt="" className="w-full h-full object-cover" />
+                        : <span className="text-[10px] uppercase text-sand-500">{c.kind?.[0] || '?'}</span>}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium text-slate-brand truncate">{c.name}</div>
+                      <div className="text-[11px] text-sand-500 truncate capitalize">
+                        {c.kind}{c.destination ? ` · ${c.destination}` : ''}{c.location ? ` · ${c.location}` : ''}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 

@@ -5,16 +5,27 @@ import { useAuth } from '../../context/AuthContext';
 import InvoiceModal from './InvoiceModal';
 import InvoiceEmailModal from './InvoiceEmailModal';
 import SplitInvoiceModal from './SplitInvoiceModal';
+import RecordPaymentModal from './RecordPaymentModal';
 import {
   Plus, FileText, Download, Edit2, Trash2, Send, CheckCircle2,
   XCircle, AlertCircle, ChevronDown, ChevronUp, Receipt, Mail, Layers,
+  DollarSign, Hourglass,
 } from 'lucide-react';
 
 const STATUS_META = {
-  draft:     { label: 'Draft',     icon: FileText,      className: 'bg-muted text-muted-foreground border-border' },
-  sent:      { label: 'Sent',      icon: Send,          className: 'bg-blue-50 text-blue-700 border-blue-200' },
-  paid:      { label: 'Paid',      icon: CheckCircle2,  className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  cancelled: { label: 'Cancelled', icon: XCircle,       className: 'bg-muted text-muted-foreground border-border' },
+  draft:          { label: 'Draft',     icon: FileText,      className: 'bg-muted text-muted-foreground border-border' },
+  sent:           { label: 'Sent',      icon: Send,          className: 'bg-blue-50 text-blue-700 border-blue-200' },
+  partially_paid: { label: 'Partial',   icon: Hourglass,     className: 'bg-amber-50 text-amber-700 border-amber-200' },
+  paid:           { label: 'Paid',      icon: CheckCircle2,  className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  cancelled:      { label: 'Cancelled', icon: XCircle,       className: 'bg-muted text-muted-foreground border-border' },
+};
+
+const PAYMENT_METHOD_LABEL = {
+  cash:          'Cash',
+  bank_transfer: 'Bank transfer',
+  mpesa:         'M-Pesa',
+  card:          'Card',
+  other:         'Other',
 };
 
 function fmtMoney(amount, currency) {
@@ -34,12 +45,14 @@ function fmtDate(d) {
 export default function InvoicesPanel({ deal }) {
   const { user } = useAuth();
   const canManage = user && user.role !== 'viewer';
+  const isAdmin = ['owner', 'admin'].includes(user?.role);
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [splitting, setSplitting] = useState(false);
   const [emailing, setEmailing] = useState(null);
   const [editing, setEditing] = useState(null);
+  const [recording, setRecording] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -117,11 +130,25 @@ export default function InvoicesPanel({ deal }) {
     }
   };
 
-  // Sort: draft + sent first (actionable), then paid + cancelled.
-  const orderRank = { draft: 0, sent: 1, paid: 2, cancelled: 3 };
+  const removePayment = async (inv, paymentId) => {
+    if (!confirm('Remove this payment? The invoice status will be recomputed.')) return;
+    setBusyId(inv._id);
+    try {
+      await api.delete(`/invoices/${inv._id}/payments/${paymentId}`);
+      toast.success('Payment removed');
+      fetchInvoices();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Remove failed');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // Sort: actionable first (draft, sent, partial), then paid, then cancelled.
+  const orderRank = { draft: 0, sent: 1, partially_paid: 2, paid: 3, cancelled: 4 };
   const sorted = [...invoices].sort((a, b) => {
-    const ra = orderRank[a.status] ?? 4;
-    const rb = orderRank[b.status] ?? 4;
+    const ra = orderRank[a.status] ?? 5;
+    const rb = orderRank[b.status] ?? 5;
     if (ra !== rb) return ra - rb;
     return new Date(b.createdAt) - new Date(a.createdAt);
   });
@@ -223,6 +250,12 @@ export default function InvoicesPanel({ deal }) {
                       {inv.dueDate && <> · due {fmtDate(inv.dueDate)}</>}
                       {inv.client?.name && <> · {inv.client.name}</>}
                     </p>
+                    {(inv.amountPaid > 0 && inv.status !== 'paid') && (
+                      <p className="text-[11px] mt-0.5 tabular-nums">
+                        <span className="text-emerald-700 font-medium">{fmtMoney(inv.amountPaid, inv.currency)} paid</span>
+                        <span className="text-muted-foreground"> · {fmtMoney(inv.amountDue, inv.currency)} outstanding</span>
+                      </p>
+                    )}
 
                     {isOpen && (
                       <div className="mt-2 p-2.5 rounded-md bg-background border border-border text-xs">
@@ -253,6 +286,31 @@ export default function InvoicesPanel({ deal }) {
                             <tr><td colSpan={3} className="text-right font-semibold pt-1">Total</td><td className="text-right font-semibold tabular-nums pt-1">{fmtMoney(inv.total, inv.currency)}</td></tr>
                           </tfoot>
                         </table>
+                        {(inv.payments || []).length > 0 && (
+                          <div className="mt-3 pt-2 border-t border-border">
+                            <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Recorded payments</p>
+                            <ul className="space-y-1">
+                              {inv.payments.map((p) => (
+                                <li key={p._id} className="flex items-center gap-2 text-[11px]">
+                                  <span className="text-foreground tabular-nums font-medium shrink-0">{fmtMoney(p.amount, p.currency || inv.currency)}</span>
+                                  <span className="text-muted-foreground">{PAYMENT_METHOD_LABEL[p.method] || p.method}</span>
+                                  {p.reference && <span className="text-muted-foreground truncate">· {p.reference}</span>}
+                                  <span className="text-muted-foreground/70 shrink-0">· {fmtDate(p.paidAt)}</span>
+                                  {isAdmin && (
+                                    <button
+                                      onClick={() => removePayment(inv, p._id)}
+                                      disabled={isBusy}
+                                      className="ml-auto p-0.5 rounded text-muted-foreground/60 hover:text-red-500 hover:bg-muted shrink-0"
+                                      title="Remove payment"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
                         {inv.paymentInstructions && (
                           <div className="mt-3 pt-2 border-t border-border">
                             <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Payment instructions</p>
@@ -300,14 +358,14 @@ export default function InvoicesPanel({ deal }) {
                         Mark sent
                       </button>
                     )}
-                    {canManage && (inv.status === 'draft' || inv.status === 'sent') && (
+                    {canManage && ['draft', 'sent', 'partially_paid'].includes(inv.status) && (
                       <button
-                        onClick={() => handleAction(inv._id, 'mark-paid', 'Marked as paid')}
+                        onClick={() => setRecording(inv)}
                         disabled={isBusy}
-                        className="px-2 py-1 rounded text-[10px] font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
-                        title="Mark as paid"
+                        className="px-2 py-1 rounded text-[10px] font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 inline-flex items-center gap-1"
+                        title="Record payment"
                       >
-                        Mark paid
+                        <DollarSign className="w-3 h-3" /> Record payment
                       </button>
                     )}
                     {canManage && inv.status !== 'paid' && inv.status !== 'cancelled' && (
@@ -357,6 +415,13 @@ export default function InvoicesPanel({ deal }) {
           deal={deal}
           onClose={() => setSplitting(false)}
           onCreated={() => { setSplitting(false); fetchInvoices(); }}
+        />
+      )}
+      {recording && (
+        <RecordPaymentModal
+          invoice={recording}
+          onClose={() => setRecording(null)}
+          onRecorded={() => { setRecording(null); fetchInvoices(); }}
         />
       )}
     </div>

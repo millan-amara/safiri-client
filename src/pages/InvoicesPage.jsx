@@ -5,23 +5,26 @@ import api from '../utils/api';
 import toast from 'react-hot-toast';
 import {
   Receipt, Search, X, Download, Edit2, Send, CheckCircle2, XCircle,
-  FileText, AlertCircle, ExternalLink, FileDown,
+  FileText, AlertCircle, ExternalLink, FileDown, DollarSign, Hourglass,
 } from 'lucide-react';
 import InvoiceModal from '../components/crm/InvoiceModal';
+import RecordPaymentModal from '../components/crm/RecordPaymentModal';
 
 const STATUS_META = {
-  draft:     { label: 'Draft',     icon: FileText,     className: 'bg-muted text-muted-foreground border-border' },
-  sent:      { label: 'Sent',      icon: Send,         className: 'bg-blue-50 text-blue-700 border-blue-200' },
-  paid:      { label: 'Paid',      icon: CheckCircle2, className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  cancelled: { label: 'Cancelled', icon: XCircle,      className: 'bg-muted text-muted-foreground border-border' },
+  draft:          { label: 'Draft',     icon: FileText,     className: 'bg-muted text-muted-foreground border-border' },
+  sent:           { label: 'Sent',      icon: Send,         className: 'bg-blue-50 text-blue-700 border-blue-200' },
+  partially_paid: { label: 'Partial',   icon: Hourglass,    className: 'bg-amber-50 text-amber-700 border-amber-200' },
+  paid:           { label: 'Paid',      icon: CheckCircle2, className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  cancelled:      { label: 'Cancelled', icon: XCircle,      className: 'bg-muted text-muted-foreground border-border' },
 };
 
 const STATUS_FILTERS = [
-  { key: 'all',       label: 'All' },
-  { key: 'draft',     label: 'Drafts' },
-  { key: 'sent',      label: 'Sent' },
-  { key: 'paid',      label: 'Paid' },
-  { key: 'cancelled', label: 'Cancelled' },
+  { key: 'all',            label: 'All' },
+  { key: 'draft',          label: 'Drafts' },
+  { key: 'sent',           label: 'Sent' },
+  { key: 'partially_paid', label: 'Partial' },
+  { key: 'paid',           label: 'Paid' },
+  { key: 'cancelled',      label: 'Cancelled' },
 ];
 
 function fmtMoney(amount, currency) {
@@ -38,14 +41,16 @@ function fmtDate(d) {
   return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-// Sum invoice totals grouped by currency. Returns the "primary" total (the
-// currency with the largest sum) plus a count of other currencies present.
-// Avoids the "add USD to KES" mistake while still surfacing one headline number.
-function summariseByCurrency(invoices) {
+// Sum invoice amounts grouped by currency. The `field` selector decides
+// whether we sum invoice totals (e.g. paid YTD), or just the unpaid balance
+// (e.g. outstanding — partial-paid invoices contribute only their amountDue,
+// not their full total). Avoids the "add USD to KES" mistake while still
+// surfacing one headline number.
+function summariseByCurrency(invoices, field = 'total') {
   const byCurrency = {};
   for (const inv of invoices) {
     const c = inv.currency || 'USD';
-    byCurrency[c] = (byCurrency[c] || 0) + (Number(inv.total) || 0);
+    byCurrency[c] = (byCurrency[c] || 0) + (Number(inv[field]) || 0);
   }
   const entries = Object.entries(byCurrency).sort((a, b) => b[1] - a[1]);
   if (entries.length === 0) return { primary: null, others: 0 };
@@ -63,6 +68,7 @@ export default function InvoicesPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState(null);
+  const [recording, setRecording] = useState(null);
   const [busyId, setBusyId] = useState(null);
 
   const fetchInvoices = async () => {
@@ -85,7 +91,7 @@ export default function InvoicesPage() {
   // Stats roll across all loaded invoices (not the filtered view) so the
   // numbers stay stable as the operator switches filter pills.
   const stats = useMemo(() => {
-    const counts = { all: 0, draft: 0, sent: 0, paid: 0, cancelled: 0 };
+    const counts = { all: 0, draft: 0, sent: 0, partially_paid: 0, paid: 0, cancelled: 0 };
     const outstanding = [];
     const paid = [];
     const now = new Date();
@@ -93,13 +99,16 @@ export default function InvoicesPage() {
     for (const inv of invoices) {
       counts.all++;
       counts[inv.status] = (counts[inv.status] || 0) + 1;
-      if (inv.status === 'draft' || inv.status === 'sent') outstanding.push(inv);
+      // Outstanding = the unpaid balance on draft/sent/partially_paid. Partial
+      // invoices contribute only their amountDue, not the full total.
+      if (['draft', 'sent', 'partially_paid'].includes(inv.status)) outstanding.push(inv);
       if (inv.status === 'paid' && inv.paidAt && new Date(inv.paidAt) >= yearStart) paid.push(inv);
     }
     return {
       counts,
-      outstanding: summariseByCurrency(outstanding),
-      paidYtd: summariseByCurrency(paid),
+      // Sum amountDue for outstanding so partial payments are reflected.
+      outstanding: summariseByCurrency(outstanding, 'amountDue'),
+      paidYtd: summariseByCurrency(paid, 'total'),
     };
   }, [invoices]);
 
@@ -245,7 +254,7 @@ export default function InvoicesPage() {
                   onDownload={() => downloadPdf(inv)}
                   onEdit={() => setEditing(inv)}
                   onMarkSent={() => handleAction(inv._id, 'mark-sent', 'Marked as sent')}
-                  onMarkPaid={() => handleAction(inv._id, 'mark-paid', 'Marked as paid')}
+                  onRecordPayment={() => setRecording(inv)}
                 />
               ))}
             </ul>
@@ -258,6 +267,13 @@ export default function InvoicesPage() {
           invoice={editing}
           onClose={() => setEditing(null)}
           onSaved={fetchInvoices}
+        />
+      )}
+      {recording && (
+        <RecordPaymentModal
+          invoice={recording}
+          onClose={() => setRecording(null)}
+          onRecorded={() => { setRecording(null); fetchInvoices(); }}
         />
       )}
     </div>
@@ -338,6 +354,7 @@ function ExportCsvButton({ statusFilter, search }) {
               <option value="all">All statuses</option>
               <option value="draft">Drafts</option>
               <option value="sent">Sent</option>
+              <option value="partially_paid">Partial</option>
               <option value="paid">Paid</option>
               <option value="cancelled">Cancelled</option>
             </select>
@@ -386,12 +403,15 @@ function StatCard({ label, subLabel, count, summary, accent }) {
   );
 }
 
-function InvoiceRow({ inv, canManage, busy, onDownload, onEdit, onMarkSent, onMarkPaid }) {
+function InvoiceRow({ inv, canManage, busy, onDownload, onEdit, onMarkSent, onRecordPayment }) {
   const meta = STATUS_META[inv.status] || STATUS_META.draft;
   const Icon = meta.icon;
   const editable = inv.status === 'draft';
   const dealId = inv.deal?._id || inv.deal;
-  const overdue = inv.status === 'sent' && inv.dueDate && new Date(inv.dueDate) < new Date();
+  // Sent or partially_paid invoices count as "expected to be paid by now" if
+  // past the due date — both should surface as overdue to the operator.
+  const overdue = ['sent', 'partially_paid'].includes(inv.status) && inv.dueDate && new Date(inv.dueDate) < new Date();
+  const showPartial = inv.amountPaid > 0 && inv.status !== 'paid';
 
   return (
     <li className="px-4 py-3 hover:bg-muted/30 transition-colors">
@@ -419,7 +439,14 @@ function InvoiceRow({ inv, canManage, busy, onDownload, onEdit, onMarkSent, onMa
           {inv.client?.name || '—'}
           {inv.client?.company && <span className="text-[11px] opacity-70 ml-1">· {inv.client.company}</span>}
         </span>
-        <span className="text-sm font-semibold text-foreground tabular-nums sm:text-right">{fmtMoney(inv.total, inv.currency)}</span>
+        <span className="text-sm font-semibold text-foreground tabular-nums sm:text-right">
+          {fmtMoney(inv.total, inv.currency)}
+          {showPartial && (
+            <span className="block text-[10px] font-normal text-emerald-700 mt-0.5">
+              {fmtMoney(inv.amountPaid, inv.currency)} paid
+            </span>
+          )}
+        </span>
         <span className="text-[11px] text-muted-foreground">
           <span className="block">{fmtDate(inv.issueDate)}</span>
           {inv.dueDate && <span className="block opacity-70">due {fmtDate(inv.dueDate)}</span>}
@@ -442,9 +469,9 @@ function InvoiceRow({ inv, canManage, busy, onDownload, onEdit, onMarkSent, onMa
               Mark sent
             </button>
           )}
-          {canManage && (inv.status === 'draft' || inv.status === 'sent') && (
-            <button onClick={onMarkPaid} disabled={busy} className="px-2 py-1 rounded text-[10px] font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
-              Mark paid
+          {canManage && ['draft', 'sent', 'partially_paid'].includes(inv.status) && (
+            <button onClick={onRecordPayment} disabled={busy} className="px-2 py-1 rounded text-[10px] font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 inline-flex items-center gap-1">
+              <DollarSign className="w-3 h-3" /> Record payment
             </button>
           )}
         </div>

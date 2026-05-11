@@ -1244,6 +1244,24 @@ function RolesPoliciesSection({ org, setOrg, team = [], isAdmin, onSave, saving 
 
         <div>
           <label className="block text-sm font-medium text-foreground mb-1">
+            Auto-create hotel vouchers when a deal is Won?
+          </label>
+          <p className="text-xs text-muted-foreground mb-2">
+            Generate one draft voucher per hotel stay in the quote so the operator only has to add the lodge confirmation number (PRN) and click Email. Skipped (with a notification) if the deal has 0 or 2+ live quotes — picking the wrong quote could send the lodge a stale itinerary.
+          </p>
+          <select
+            value={org.preferences?.autoGenerateVouchersOnWon === true ? 'on' : 'off'}
+            onChange={(e) => updatePref('autoGenerateVouchersOnWon', e.target.value === 'on')}
+            disabled={!isAdmin}
+            className="w-full sm:w-72 px-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:border-primary transition-colors disabled:opacity-60"
+          >
+            <option value="off">No — vouchers are manual only</option>
+            <option value="on">Yes — auto-draft on Won</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-foreground mb-1">
             Lead handoff between pipelines
           </label>
           <p className="text-xs text-muted-foreground mb-2">

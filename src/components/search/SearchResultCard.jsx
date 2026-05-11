@@ -59,6 +59,19 @@ function HotelPriceBlock({ price }) {
       </div>
     );
   }
+  if (price.pricingMode === 'perNightInWindow') {
+    // The 3-night sample is an implementation detail the operator doesn't need
+    // to see — they just want the per-night number. The "per-night sample"
+    // badge below the row is enough disclosure of the mode.
+    return (
+      <div className="text-right">
+        <div className="text-base font-semibold text-slate-brand whitespace-nowrap">
+          {fmtMoney(price.perNight, price.currency)}
+          <span className="text-sand-500 text-xs font-normal"> /night</span>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="text-right">
       <div className="text-base font-semibold text-slate-brand whitespace-nowrap">
@@ -208,7 +221,7 @@ export default function SearchResultCard({ result, onSelect, rationale, rational
           </div>
 
           {/* Flags */}
-          {(flags.noDatesGiven || flags.paxAssumed || flags.childAgeAssumed || flags.childRateApplied
+          {(flags.noDatesGiven || flags.searchWindowMode || flags.paxAssumed || flags.childAgeAssumed || flags.childRateApplied
             || flags.blockingCondition || flags.imagesMissing || flags.minAgeViolation
             || flags.groupSizeExceeded || flags.capacityExceeded || flags.noPaxGiven
             || flags.noDaysGiven || flags.paxTierFallback || flags.childRebateNotApplied
@@ -216,6 +229,9 @@ export default function SearchResultCard({ result, onSelect, rationale, rational
             <div className="mt-1.5 flex flex-wrap gap-1">
               {flags.noDatesGiven && (
                 <FlagBadge tone="gray" title="No dates given — showing the cheapest published rate">no dates</FlagBadge>
+              )}
+              {flags.searchWindowMode && (
+                <FlagBadge tone="blue" title="Wide date range — priced per-night from a 3-night sample inside the window">per-night sample</FlagBadge>
               )}
               {flags.paxAssumed && (
                 <FlagBadge tone="gray" title="No pax given — priced for 2 adults">2 adults assumed</FlagBadge>
