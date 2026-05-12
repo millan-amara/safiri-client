@@ -1,14 +1,15 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Navigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend,
+  PieChart, Pie, Cell, Legend, BarChart, Bar,
 } from 'recharts';
 import {
   Building2, Users, FileText, Sparkles, ShieldCheck, RefreshCw,
   TrendingUp, Activity, Search, X, CalendarPlus, Coins, Ban,
-  AlertTriangle,
+  AlertTriangle, Mail, MailCheck, UserX, UserCheck, Key, ArrowRightLeft,
+  Webhook, Wallet, CheckCircle2, XCircle, LogIn, Crown, Eye, MessageCircle, Phone,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
@@ -39,10 +40,39 @@ const fmtNum = (n) =>
 
 const fmtPct = (n) => `${((n || 0) * 100).toFixed(1)}%`;
 
+// Strip everything that isn't a digit or leading + for click-to-WhatsApp /
+// tel: URLs. wa.me requires no leading + (just digits); tel: tolerates both
+// but stripping spaces/dashes keeps it consistent. Returns null when there
+// aren't enough digits to be a real number.
+const phoneDigits = (raw) => {
+  if (!raw) return null;
+  const digits = String(raw).replace(/[^0-9]/g, '');
+  return digits.length >= 6 ? digits : null;
+};
+
 const shortDate = (iso) => {
   if (!iso) return '—';
   const d = new Date(iso);
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
+// Relative-time string used by the "last active" column and the member list.
+// Designed to read at a glance: "2h", "3d", "5w". Beyond 60 days falls back
+// to the date so it doesn't look like a healthy "30+ days" when an org has
+// actually been dormant for years.
+const relTime = (iso) => {
+  if (!iso) return 'never';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 0) return 'just now';
+  const minutes = ms / 60000;
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${Math.floor(minutes)}m`;
+  const hours = minutes / 60;
+  if (hours < 24) return `${Math.floor(hours)}h`;
+  const days = hours / 24;
+  if (days < 14) return `${Math.floor(days)}d`;
+  if (days < 60) return `${Math.floor(days / 7)}w`;
+  return formatDate(iso);
 };
 
 export default function AdminDashboardPage() {
@@ -111,6 +141,7 @@ export default function AdminDashboardPage() {
         </div>
         <TopOrgsByAi usage={aiUsage} />
       </div>
+      <UserSearchPanel onOpenOrg={setSelectedOrgId} />
       <OrgsTable onSelect={setSelectedOrgId} version={version} />
       {selectedOrgId && (
         <OrgDetailModal
@@ -443,6 +474,13 @@ function OrgsTable({ onSelect, version }) {
   const [plan, setPlan] = useState('');
   const [status, setStatus] = useState('');
 
+  // Snapshot "now" per fetch so the dormant-row classifier doesn't call
+  // Date.now() per row. The 30-day threshold is coarse enough that a single
+  // timestamp per fetch is plenty — purity rule still fires for Date.now()
+  // even inside useMemo, but the value is stable across renders here.
+  // eslint-disable-next-line react-hooks/purity, react-hooks/exhaustive-deps
+  const dormantThreshold = useMemo(() => new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), [data]);
+
   // Debounce the search input — typing shouldn't fire a request per keystroke.
   const [qDebounced, setQDebounced] = useState('');
   useEffect(() => {
@@ -516,21 +554,24 @@ function OrgsTable({ onSelect, version }) {
               <th className="text-left py-2 font-medium">Trial / period ends</th>
               <th className="text-right py-2 font-medium">AI credits</th>
               <th className="text-right py-2 font-medium">Members</th>
+              <th className="text-right py-2 font-medium">Last active</th>
               <th className="text-right py-2 font-medium">Joined</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={7} className="text-center py-6 text-muted-foreground text-xs">Loading…</td></tr>
+              <tr><td colSpan={8} className="text-center py-6 text-muted-foreground text-xs">Loading…</td></tr>
             )}
             {!loading && data.items.length === 0 && (
-              <tr><td colSpan={7} className="text-center py-6 text-muted-foreground text-xs">No organizations match.</td></tr>
+              <tr><td colSpan={8} className="text-center py-6 text-muted-foreground text-xs">No organizations match.</td></tr>
             )}
             {!loading && data.items.map((o) => {
               const ends = o.subscriptionStatus === 'trialing' ? o.trialEndsAt : o.currentPeriodEnd;
               const used = o.aiCreditsUsed || 0;
               const limit = o.aiCreditsLimit || 0;
               const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+              // "Dormant" classes: visually fade rows the operator should investigate.
+              const dormant = !o.lastActiveAt || new Date(o.lastActiveAt) < dormantThreshold;
               return (
                 <tr
                   key={o._id}
@@ -538,9 +579,20 @@ function OrgsTable({ onSelect, version }) {
                   className="border-b border-border/50 last:border-0 hover:bg-muted/40 cursor-pointer"
                 >
                   <td className="py-2.5 pr-3">
-                    <div className="font-medium text-foreground">{o.name}</div>
-                    <div className="text-[11px] text-muted-foreground">
-                      {o.owner?.email || '(no owner)'}
+                    <div className="font-medium text-foreground flex items-center gap-1.5">
+                      {o.name}
+                      {o.whiteLabel && (
+                        <span title="White-label enabled">
+                          <Crown className="w-3 h-3 text-amber-500" />
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground flex items-center gap-2 flex-wrap">
+                      <span>{o.owner?.email || '(no owner)'}</span>
+                      {/* Prefer the owner's personal phone — it's what they
+                          actually pick up. Falls back to the org's businessInfo
+                          phone (set in Settings) when the owner has none. */}
+                      <PhoneActions phone={o.owner?.phone || o.businessInfo?.phone} compact />
                     </div>
                   </td>
                   <td className="py-2.5 pr-3">
@@ -578,6 +630,12 @@ function OrgsTable({ onSelect, version }) {
                     </div>
                   </td>
                   <td className="py-2.5 pr-3 text-right tabular-nums text-foreground">{fmtNum(o.userCount)}</td>
+                  <td
+                    className={`py-2.5 pr-3 text-right text-xs tabular-nums ${dormant ? 'text-muted-foreground/60' : 'text-foreground'}`}
+                    title={o.lastActiveAt ? new Date(o.lastActiveAt).toLocaleString() : 'No activity recorded'}
+                  >
+                    {relTime(o.lastActiveAt)}
+                  </td>
                   <td className="py-2.5 text-right text-muted-foreground text-xs">{formatDate(o.createdAt)}</td>
                 </tr>
               );
@@ -616,7 +674,8 @@ function OrgsTable({ onSelect, version }) {
 function OrgDetailModal({ orgId, onClose, onChanged }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [action, setAction] = useState(null); // 'extend' | 'grant' | 'cancel' | null
+  // 'extend' | 'grant' | 'cancel' | 'plan' | 'reset' | 'apikey' | 'whitelabel' | null
+  const [action, setAction] = useState(null);
 
   const reload = async () => {
     setLoading(true);
@@ -644,19 +703,25 @@ function OrgDetailModal({ orgId, onClose, onChanged }) {
   }, [onClose]);
 
   const org = data?.org;
+  const isCancelled = org?.subscriptionStatus === 'cancelled' && org?.currentPeriodEnd && new Date(org.currentPeriodEnd) <= new Date();
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-card border border-border rounded-2xl shadow-2xl">
-        <div className="sticky top-0 bg-card border-b border-border px-6 py-4 flex items-start justify-between">
+      <div className="relative w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-card border border-border rounded-2xl shadow-2xl">
+        <div className="sticky top-0 z-10 bg-card border-b border-border px-6 py-4 flex items-start justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-foreground">
+            <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
               {loading ? 'Loading…' : (org?.name || 'Org')}
+              {org?.whiteLabel && (
+                <span title="White-label enabled" className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                  <Crown className="w-3 h-3" /> white-label
+                </span>
+              )}
             </h2>
             {org && (
               <p className="text-xs text-muted-foreground mt-0.5">
-                {org.slug || org._id} · {org.plan} · {(org.subscriptionStatus || '').replace('_', ' ')}
+                {org.slug || org._id} · {org.plan}{org.annual ? ' · annual' : ''} · {(org.subscriptionStatus || '').replace('_', ' ')}
               </p>
             )}
           </div>
@@ -670,11 +735,11 @@ function OrgDetailModal({ orgId, onClose, onChanged }) {
             <div className="w-6 h-6 border-2 border-border border-t-primary rounded-full animate-spin" />
           </div>
         ) : (
-          <div className="p-6 space-y-5">
+          <div className="p-6 space-y-6">
             <DetailGrid org={org} counts={data} />
 
             {!action && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
                 <ActionButton
                   icon={CalendarPlus}
                   label="Extend trial"
@@ -690,27 +755,72 @@ function OrgDetailModal({ orgId, onClose, onChanged }) {
                   onClick={() => setAction('grant')}
                 />
                 <ActionButton
+                  icon={ArrowRightLeft}
+                  label="Change plan"
+                  tone="violet"
+                  onClick={() => setAction('plan')}
+                />
+                <ActionButton
+                  icon={RefreshCw}
+                  label="Reset counters"
+                  tone="amber"
+                  onClick={() => setAction('reset')}
+                />
+                <ActionButton
+                  icon={Key}
+                  label="Rotate API key"
+                  tone="slate"
+                  onClick={() => setAction('apikey')}
+                />
+                <ActionButton
                   icon={Ban}
                   label="Force cancel"
                   tone="rose"
-                  disabled={org.subscriptionStatus === 'cancelled' && org.currentPeriodEnd && new Date(org.currentPeriodEnd) <= new Date()}
-                  hint={org.subscriptionStatus === 'cancelled' && org.currentPeriodEnd && new Date(org.currentPeriodEnd) <= new Date() ? 'Already cancelled' : null}
+                  disabled={isCancelled}
+                  hint={isCancelled ? 'Already cancelled' : null}
                   onClick={() => setAction('cancel')}
                 />
               </div>
             )}
 
-            {action === 'extend' && <ExtendTrialForm orgId={orgId} onCancel={() => setAction(null)} onDone={handleSuccess} />}
-            {action === 'grant' && <GrantCreditsForm orgId={orgId} onCancel={() => setAction(null)} onDone={handleSuccess} />}
-            {action === 'cancel' && <ForceCancelForm orgId={orgId} orgName={org.name} onCancel={() => setAction(null)} onDone={handleSuccess} />}
+            {!action && (
+              <button
+                onClick={() => setAction('whitelabel')}
+                className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5"
+              >
+                <Crown className="w-3 h-3" />
+                {org.whiteLabel ? 'Disable' : 'Enable'} white-label override
+              </button>
+            )}
+
+            {action === 'extend'     && <ExtendTrialForm     orgId={orgId} onCancel={() => setAction(null)} onDone={handleSuccess} />}
+            {action === 'grant'      && <GrantCreditsForm    orgId={orgId} onCancel={() => setAction(null)} onDone={handleSuccess} />}
+            {action === 'cancel'     && <ForceCancelForm     orgId={orgId} orgName={org.name} onCancel={() => setAction(null)} onDone={handleSuccess} />}
+            {action === 'plan'       && <ChangePlanForm      orgId={orgId} currentPlan={org.plan} currentAnnual={!!org.annual} onCancel={() => setAction(null)} onDone={handleSuccess} />}
+            {action === 'reset'      && <ResetCountersForm   orgId={orgId} org={org} onCancel={() => setAction(null)} onDone={handleSuccess} />}
+            {action === 'apikey'     && <RotateApiKeyForm    orgId={orgId} currentKey={org.apiKey} onCancel={() => setAction(null)} onDone={handleSuccess} />}
+            {action === 'whitelabel' && <WhiteLabelForm      orgId={orgId} currentValue={!!org.whiteLabel} onCancel={() => setAction(null)} onDone={handleSuccess} />}
+
+            <ActivityPanel orgId={orgId} />
+
+            <MembersPanel members={data?.members || []} ownerId={org.owner} onUserChanged={reload} />
+
+            {data?.recentFailedWebhooks?.length > 0 && (
+              <FailedWebhooksPanel rows={data.recentFailedWebhooks} />
+            )}
 
             {data?.recentAi?.length > 0 && (
               <div>
-                <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">Recent AI calls</h3>
-                <div className="space-y-1 max-h-48 overflow-y-auto">
+                <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2 flex items-center gap-1.5">
+                  <Sparkles className="w-3 h-3" /> Recent AI calls
+                </h3>
+                <div className="space-y-1 max-h-48 overflow-y-auto border border-border/50 rounded-lg p-2">
                   {data.recentAi.map((r) => (
                     <div key={r._id} className="flex items-center justify-between text-xs py-1 border-b border-border/50 last:border-0">
-                      <span className="font-mono text-foreground">{r.endpoint}</span>
+                      <span className="font-mono text-foreground flex items-center gap-1.5">
+                        {r.success === false && <XCircle className="w-3 h-3 text-rose-500" />}
+                        {r.endpoint}
+                      </span>
                       <span className="text-muted-foreground">
                         {fmtMoney(r.estimatedCostUsd)} · {new Date(r.timestamp).toLocaleString()}
                       </span>
@@ -727,28 +837,82 @@ function OrgDetailModal({ orgId, onClose, onChanged }) {
 }
 
 function DetailGrid({ org, counts }) {
-  const rows = [
-    ['Owner', org.owner?.email || counts?.members?.find((m) => m._id === org.owner)?.email || '—'],
-    ['Members', counts?.members?.length ?? 0],
-    ['Quotes', fmtNum(counts?.quoteCount)],
-    ['Deals', fmtNum(counts?.dealCount)],
-    ['Joined', formatDate(org.createdAt)],
-    ['Trial ends', org.trialEndsAt ? formatDate(org.trialEndsAt) : '—'],
-    ['Period ends', org.currentPeriodEnd ? formatDate(org.currentPeriodEnd) : '—'],
-    ['Paystack sub', org.paystackSubscriptionCode || '—'],
-    ['AI credits', `${fmtNum(org.aiCreditsUsed)} / ${fmtNum(org.aiCreditsLimit)}`],
-    ['Purchased AI', fmtNum(org.purchasedCredits)],
-    ['PDF pages', `${fmtNum(org.pdfPagesUsed)} / ${fmtNum(org.pdfPagesLimit)}`],
-    ['Purchased PDF', fmtNum(org.purchasedPdfPages)],
-  ];
+  const invoiced = counts?.invoices?.totalInvoiced || 0;
+  const paid = counts?.invoices?.totalPaid || 0;
+  const outstanding = counts?.invoices?.outstanding || 0;
+  const openValue = counts?.deals?.openPipelineValue || 0;
+  const wonValue = counts?.deals?.wonValue || 0;
+  const ccy = org.defaults?.currency || 'USD';
+  const fmtOrgMoney = (n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: ccy, minimumFractionDigits: 0 }).format(n || 0);
+
+  // The owner is the User doc that matches org.owner. /admin/orgs/:id returns
+  // members already filtered to this org, so we look up the owner there to
+  // get their phone (not exposed on the org itself).
+  const ownerMember = counts?.members?.find((m) => String(m._id) === String(org.owner));
+  const ownerPhone = ownerMember?.phone || org.businessInfo?.phone || '';
+
   return (
-    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-      {rows.map(([k, v]) => (
-        <div key={k} className="flex justify-between gap-2">
-          <span className="text-muted-foreground">{k}</span>
-          <span className="text-foreground tabular-nums truncate" title={String(v)}>{v}</span>
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+        <StatTile label="Members" value={fmtNum(counts?.members?.length ?? 0)} icon={Users} />
+        <StatTile label="Quotes" value={fmtNum(counts?.quoteCount)} icon={FileText} />
+        <StatTile label="Deals (won)" value={`${fmtNum(counts?.dealCount)} (${fmtNum(counts?.deals?.wonCount || 0)})`} icon={TrendingUp} />
+        <StatTile label="Invoiced (paid)" value={`${fmtOrgMoney(invoiced)} (${fmtOrgMoney(paid)})`} icon={Wallet} />
+      </div>
+
+      {ownerPhone && (
+        <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg bg-emerald-50/40 border border-emerald-100">
+          <span className="text-muted-foreground">Contact owner:</span>
+          <span className="font-medium text-foreground">{ownerMember?.email || org.owner?.email || '—'}</span>
+          <PhoneActions phone={ownerPhone} />
         </div>
-      ))}
+      )}
+
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+        <DetailRow k="Owner"          v={ownerMember?.email || org.owner?.email || '—'} />
+        <DetailRow k="Outstanding AR" v={fmtOrgMoney(outstanding)} />
+        <DetailRow k="Open pipeline"  v={fmtOrgMoney(openValue)} />
+        <DetailRow k="Won value"      v={fmtOrgMoney(wonValue)} />
+        <DetailRow k="Joined"         v={formatDate(org.createdAt)} />
+        <DetailRow k="Trial ends"     v={org.trialEndsAt ? formatDate(org.trialEndsAt) : '—'} />
+        <DetailRow k="Period ends"    v={org.currentPeriodEnd ? formatDate(org.currentPeriodEnd) : '—'} />
+        <DetailRow k="Paystack sub"   v={org.paystackSubscriptionCode || '—'} />
+        <DetailRow k="AI credits"     v={`${fmtNum(org.aiCreditsUsed)} / ${fmtNum(org.aiCreditsLimit)}`} />
+        <DetailRow k="Purchased AI"   v={fmtNum(org.purchasedCredits)} />
+        <DetailRow k="PDF pages"      v={`${fmtNum(org.pdfPagesUsed)} / ${fmtNum(org.pdfPagesLimit)}`} />
+        <DetailRow k="Purchased PDF"  v={fmtNum(org.purchasedPdfPages)} />
+        <DetailRow k="Quotes (month)" v={fmtNum(org.quotesThisMonth)} />
+        <DetailRow k="Business phone" v={org.businessInfo?.phone || '—'} />
+        <DetailRow k="Business email" v={org.businessInfo?.email || '—'} />
+        <DetailRow k="API key"        v={org.apiKey ? `${org.apiKey.slice(0, 10)}…${org.apiKey.slice(-4)}` : '—'} mono />
+        <DetailRow k="Webhook URL"    v={org.webhookUrl || '—'} mono />
+        <DetailRow k="Accounting hook" v={org.preferences?.accountingWebhookUrl || '—'} mono />
+      </div>
+    </div>
+  );
+}
+
+function StatTile({ label, value, icon: Icon }) {
+  return (
+    <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+        <Icon className="w-3 h-3" /> {label}
+      </div>
+      <div className="text-sm font-semibold text-foreground tabular-nums mt-0.5">{value}</div>
+    </div>
+  );
+}
+
+function DetailRow({ k, v, mono }) {
+  return (
+    <div className="flex justify-between gap-2">
+      <span className="text-muted-foreground">{k}</span>
+      <span
+        className={`text-foreground tabular-nums truncate ${mono ? 'font-mono text-[11px]' : ''}`}
+        title={String(v)}
+      >
+        {v}
+      </span>
     </div>
   );
 }
@@ -758,6 +922,9 @@ function ActionButton({ icon: Icon, label, tone, onClick, disabled, hint }) {
     blue:    'border-blue-200 text-blue-700 hover:bg-blue-50',
     emerald: 'border-emerald-200 text-emerald-700 hover:bg-emerald-50',
     rose:    'border-rose-200 text-rose-700 hover:bg-rose-50',
+    violet:  'border-violet-200 text-violet-700 hover:bg-violet-50',
+    amber:   'border-amber-200 text-amber-700 hover:bg-amber-50',
+    slate:   'border-slate-200 text-slate-700 hover:bg-slate-50',
   };
   return (
     <button
@@ -969,6 +1136,697 @@ function FormShell({ title, children, onCancel, onSubmit, submitLabel, submitTon
         >
           {busy ? 'Working…' : submitLabel}
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── New action forms ───────────────────────────────────────────────────────
+
+const PLAN_LIST = ['trial', 'starter', 'pro', 'business', 'enterprise'];
+
+function ChangePlanForm({ orgId, currentPlan, currentAnnual, onCancel, onDone }) {
+  const [plan, setPlan] = useState(currentPlan || 'pro');
+  const [annual, setAnnual] = useState(!!currentAnnual);
+  const [syncLimits, setSyncLimits] = useState(true);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (plan === currentPlan && annual === currentAnnual) {
+      toast.error('Pick a different plan or billing cadence.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const { data } = await api.post(`/admin/orgs/${orgId}/change-plan`, {
+        plan, annual, syncLimits, reason: reason || undefined,
+      });
+      toast.success(data.message);
+      onDone();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Change failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <FormShell title="Change plan" onCancel={onCancel} onSubmit={submit} submitLabel="Apply" busy={busy}>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-muted-foreground">New plan</label>
+          <select
+            value={plan}
+            onChange={(e) => setPlan(e.target.value)}
+            className="w-full px-3 py-1.5 text-sm rounded-lg border border-border bg-background"
+          >
+            {PLAN_LIST.map((p) => (
+              <option key={p} value={p}>{p}{p === currentPlan ? ' (current)' : ''}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground">Billing</label>
+          <select
+            value={annual ? 'annual' : 'monthly'}
+            onChange={(e) => setAnnual(e.target.value === 'annual')}
+            className="w-full px-3 py-1.5 text-sm rounded-lg border border-border bg-background"
+            disabled={plan === 'trial'}
+          >
+            <option value="monthly">Monthly</option>
+            <option value="annual">Annual</option>
+          </select>
+        </div>
+      </div>
+      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={syncLimits}
+          onChange={(e) => setSyncLimits(e.target.checked)}
+        />
+        Re-seed limits + white-label flag from plan defaults (recommended)
+      </label>
+      <label className="text-xs text-muted-foreground">Reason (logged)</label>
+      <input
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="e.g. 'Enterprise contract finalised'"
+        className="w-full px-3 py-1.5 text-sm rounded-lg border border-border bg-background"
+      />
+      <p className="text-[11px] text-muted-foreground">
+        Bypasses Paystack — for goodwill upgrades, enterprise comps, or correcting state when a webhook didn't land. Period end is extended to at least today + {annual ? '12' : '1'} {annual ? 'months' : 'month'}.
+      </p>
+    </FormShell>
+  );
+}
+
+function ResetCountersForm({ orgId, org, onCancel, onDone }) {
+  const [ai, setAi] = useState(false);
+  const [pdf, setPdf] = useState(false);
+  const [quotes, setQuotes] = useState(false);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (!ai && !pdf && !quotes) {
+      toast.error('Select at least one counter to reset.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const { data } = await api.post(`/admin/orgs/${orgId}/reset-counters`, {
+        ai, pdf, quotes, reason: reason || undefined,
+      });
+      toast.success(data.message);
+      onDone();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Reset failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <FormShell title="Reset monthly counters" onCancel={onCancel} onSubmit={submit} submitLabel="Reset to zero" busy={busy}>
+      <p className="text-[11px] text-muted-foreground">
+        Zeroes the monthly counter without waiting for the 1st. Does NOT touch the carry-pool (purchasedCredits / purchasedPdfPages). Use this to refund usage after a bug or unblock an org mid-cycle.
+      </p>
+      <label className="flex items-start gap-2 text-xs text-muted-foreground p-2 rounded-lg border border-border">
+        <input type="checkbox" checked={ai} onChange={(e) => setAi(e.target.checked)} className="mt-0.5" />
+        <span>
+          <span className="text-foreground font-medium">AI credits used</span>
+          <span className="block text-[10px]">currently {fmtNum(org.aiCreditsUsed)} / {fmtNum(org.aiCreditsLimit)}</span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2 text-xs text-muted-foreground p-2 rounded-lg border border-border">
+        <input type="checkbox" checked={pdf} onChange={(e) => setPdf(e.target.checked)} className="mt-0.5" />
+        <span>
+          <span className="text-foreground font-medium">PDF pages used</span>
+          <span className="block text-[10px]">currently {fmtNum(org.pdfPagesUsed)} / {fmtNum(org.pdfPagesLimit)}</span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2 text-xs text-muted-foreground p-2 rounded-lg border border-border">
+        <input type="checkbox" checked={quotes} onChange={(e) => setQuotes(e.target.checked)} className="mt-0.5" />
+        <span>
+          <span className="text-foreground font-medium">Quotes this month</span>
+          <span className="block text-[10px]">currently {fmtNum(org.quotesThisMonth)}</span>
+        </span>
+      </label>
+      <label className="text-xs text-muted-foreground">Reason (logged)</label>
+      <input
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="e.g. 'CSV importer double-charged credits'"
+        className="w-full px-3 py-1.5 text-sm rounded-lg border border-border bg-background"
+      />
+    </FormShell>
+  );
+}
+
+function RotateApiKeyForm({ orgId, currentKey, onCancel, onDone }) {
+  const [confirmed, setConfirmed] = useState(false);
+  const [newKey, setNewKey] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      const { data } = await api.post(`/admin/orgs/${orgId}/rotate-api-key`);
+      setNewKey(data.apiKey);
+      toast.success(data.message);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Rotate failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (newKey) {
+    return (
+      <div className="border border-emerald-200 bg-emerald-50/50 rounded-xl p-4 space-y-2">
+        <div className="text-sm font-medium text-emerald-800 flex items-center gap-1.5">
+          <CheckCircle2 className="w-4 h-4" /> New API key generated
+        </div>
+        <p className="text-[11px] text-emerald-700">
+          The old key is now invalid. Copy this somewhere safe — it won't be shown in full again.
+        </p>
+        <code className="block bg-white border border-emerald-200 rounded-lg p-2 text-xs font-mono break-all text-foreground">
+          {newKey}
+        </code>
+        <div className="flex justify-end">
+          <button
+            onClick={onDone}
+            className="px-3 py-1.5 text-sm rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <FormShell title="Rotate API key" onCancel={onCancel} onSubmit={submit} submitLabel="Generate new key" busy={busy} submitDisabled={!confirmed}>
+      <div className="flex gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+        <div>
+          Any external integration (n8n, Zapier, custom scripts) using the existing key will stop working immediately. Make sure the owner is ready to update them.
+        </div>
+      </div>
+      <div className="text-xs text-muted-foreground">
+        Current: <code className="font-mono text-[11px] text-foreground">{currentKey ? `${currentKey.slice(0, 10)}…${currentKey.slice(-4)}` : 'none'}</code>
+      </div>
+      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
+        I've coordinated with the org owner.
+      </label>
+    </FormShell>
+  );
+}
+
+function WhiteLabelForm({ orgId, currentValue, onCancel, onDone }) {
+  const [enabled, setEnabled] = useState(!currentValue);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      const { data } = await api.post(`/admin/orgs/${orgId}/toggle-white-label`, {
+        enabled, reason: reason || undefined,
+      });
+      toast.success(data.message);
+      onDone();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Toggle failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <FormShell title="White-label override" onCancel={onCancel} onSubmit={submit} submitLabel={enabled ? 'Enable' : 'Disable'} busy={busy}>
+      <p className="text-[11px] text-muted-foreground">
+        Independent of the plan default. Use to hand-comp white-label to a Pro org as a sweetener, or pull it from a tier that hasn't paid for it. Re-seeded if you later run "Change plan" with sync-limits on.
+      </p>
+      <label className="flex items-center gap-2 text-xs text-foreground">
+        <input type="radio" name="wl" checked={enabled} onChange={() => setEnabled(true)} />
+        Enable (hide "Powered by SafiriPro" on shared quotes)
+      </label>
+      <label className="flex items-center gap-2 text-xs text-foreground">
+        <input type="radio" name="wl" checked={!enabled} onChange={() => setEnabled(false)} />
+        Disable (restore SafiriPro attribution)
+      </label>
+      <label className="text-xs text-muted-foreground">Reason (logged)</label>
+      <input
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="e.g. 'Comp — botched onboarding'"
+        className="w-full px-3 py-1.5 text-sm rounded-lg border border-border bg-background"
+      />
+    </FormShell>
+  );
+}
+
+// ─── Org modal: activity panel ──────────────────────────────────────────────
+
+const TIMELINE_ICONS = {
+  quote_created:    { Icon: FileText,    color: 'text-amber-600 bg-amber-50' },
+  deal_created:     { Icon: TrendingUp,  color: 'text-blue-600 bg-blue-50' },
+  deal_won:         { Icon: CheckCircle2,color: 'text-emerald-600 bg-emerald-50' },
+  deal_lost:        { Icon: XCircle,     color: 'text-rose-600 bg-rose-50' },
+  invoice_created:  { Icon: Wallet,      color: 'text-violet-600 bg-violet-50' },
+  payment_recorded: { Icon: Coins,       color: 'text-emerald-600 bg-emerald-50' },
+  user_login:       { Icon: LogIn,       color: 'text-slate-500 bg-slate-50' },
+};
+
+function ActivityPanel({ orgId }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [days, setDays] = useState(30);
+
+  useEffect(() => {
+    // Matches the fetch-on-deps pattern used by OrgsTable above. The
+    // set-state-in-effect rule fires here but not on the identical pattern
+    // in OrgsTable — leaving consistent with the rest of the page.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
+    api.get(`/admin/orgs/${orgId}/activity?days=${days}`)
+      .then(({ data }) => setData(data))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [orgId, days]);
+
+  return (
+    <div className="border border-border rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+            <Activity className="w-3 h-3" /> Activity · last {days} days
+          </h3>
+          {data?.lastActiveAt && (
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Last activity {relTime(data.lastActiveAt)} ({new Date(data.lastActiveAt).toLocaleString()})
+            </p>
+          )}
+        </div>
+        <select
+          value={days}
+          onChange={(e) => setDays(Number(e.target.value))}
+          className="text-xs rounded-lg border border-border bg-background px-2 py-1"
+        >
+          <option value={7}>7d</option>
+          <option value={30}>30d</option>
+          <option value={90}>90d</option>
+        </select>
+      </div>
+
+      {loading ? (
+        <div className="h-32 flex items-center justify-center">
+          <div className="w-5 h-5 border-2 border-border border-t-primary rounded-full animate-spin" />
+        </div>
+      ) : (
+        <>
+          <div className="h-28 mb-3">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={data?.sparkline || []} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                <XAxis
+                  dataKey="date"
+                  tickFormatter={shortDate}
+                  tick={{ fontSize: 10, fill: '#6b7280' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: '#6b7280' }}
+                  axisLine={false}
+                  tickLine={false}
+                  allowDecimals={false}
+                  width={28}
+                />
+                <Tooltip
+                  contentStyle={{ borderRadius: 8, fontSize: 11, border: '1px solid #e5e7eb' }}
+                  labelFormatter={(d) => formatDate(d)}
+                />
+                <Bar dataKey="quotes"   stackId="a" fill="#f59e0b" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="deals"    stackId="a" fill="#3b82f6" />
+                <Bar dataKey="invoices" stackId="a" fill="#8b5cf6" />
+                <Bar dataKey="payments" stackId="a" fill="#10b981" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="flex items-center gap-3 text-[10px] text-muted-foreground mb-2 flex-wrap">
+            <LegendDot color="#f59e0b" label="Quotes" />
+            <LegendDot color="#3b82f6" label="Deals" />
+            <LegendDot color="#8b5cf6" label="Invoices" />
+            <LegendDot color="#10b981" label="Payments" />
+          </div>
+
+          {data?.timeline?.length ? (
+            <div className="max-h-72 overflow-y-auto space-y-1 border-t border-border pt-2">
+              {data.timeline.map((e, i) => {
+                const def = TIMELINE_ICONS[e.kind] || { Icon: Activity, color: 'text-slate-500 bg-slate-50' };
+                return (
+                  <div key={`${e.refId || ''}-${e.kind}-${i}`} className="flex items-start gap-2 text-xs py-1">
+                    <div className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 ${def.color}`}>
+                      <def.Icon className="w-3 h-3" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-foreground truncate">{e.label}</div>
+                      <div className="text-[10px] text-muted-foreground">
+                        {new Date(e.ts).toLocaleString()}{e.by?.email ? ` · ${e.by.email}` : ''}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground text-center py-4 border-t border-border">
+              No activity in this window.
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function LegendDot({ color, label }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: color }} />
+      {label}
+    </span>
+  );
+}
+
+// ─── Org modal: members panel with per-user actions ─────────────────────────
+
+function MembersPanel({ members, ownerId, onUserChanged }) {
+  const [busyUserId, setBusyUserId] = useState(null);
+
+  const run = async (userId, label, fn) => {
+    setBusyUserId(userId);
+    try {
+      const { data } = await fn();
+      toast.success(data.message || `${label} done`);
+      await onUserChanged?.();
+    } catch (err) {
+      toast.error(err.response?.data?.message || `${label} failed`);
+    } finally {
+      setBusyUserId(null);
+    }
+  };
+
+  return (
+    <div>
+      <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2 flex items-center gap-1.5">
+        <Users className="w-3 h-3" /> Members ({members.length})
+      </h3>
+      <div className="border border-border rounded-lg overflow-hidden">
+        <table className="w-full text-xs">
+          <thead className="bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground">
+            <tr>
+              <th className="text-left py-1.5 px-3 font-medium">User</th>
+              <th className="text-left py-1.5 px-3 font-medium">Role</th>
+              <th className="text-left py-1.5 px-3 font-medium">Phone</th>
+              <th className="text-left py-1.5 px-3 font-medium">Status</th>
+              <th className="text-left py-1.5 px-3 font-medium">Last login</th>
+              <th className="text-right py-1.5 px-3 font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {members.map((m) => {
+              const isOwner = String(m._id) === String(ownerId);
+              const busy = busyUserId === m._id;
+              return (
+                <tr key={m._id} className="border-t border-border/60">
+                  <td className="py-2 px-3">
+                    <div className="text-foreground flex items-center gap-1.5">
+                      {m.email}
+                      {isOwner && <Crown className="w-3 h-3 text-amber-500" />}
+                      {!m.emailVerified && (
+                        <span title="Email not verified">
+                          <Mail className="w-3 h-3 text-amber-500" />
+                        </span>
+                      )}
+                    </div>
+                    {m.name && <div className="text-[10px] text-muted-foreground">{m.name}</div>}
+                  </td>
+                  <td className="py-2 px-3 text-muted-foreground">{m.role}</td>
+                  <td className="py-2 px-3">
+                    {m.phone ? <PhoneActions phone={m.phone} /> : <span className="text-muted-foreground/60">—</span>}
+                  </td>
+                  <td className="py-2 px-3">
+                    <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full ${
+                      m.status === 'pending' ? 'bg-amber-50 text-amber-700' :
+                      m.status === 'disabled' || !m.isActive ? 'bg-rose-50 text-rose-700' :
+                      'bg-emerald-50 text-emerald-700'
+                    }`}>
+                      {m.status}{!m.isActive && m.status === 'active' ? ' · blocked' : ''}
+                    </span>
+                  </td>
+                  <td className="py-2 px-3 text-muted-foreground">{m.lastLogin ? relTime(m.lastLogin) : 'never'}</td>
+                  <td className="py-2 px-3 text-right">
+                    <div className="inline-flex items-center gap-1">
+                      {!m.emailVerified && (
+                        <IconActionButton
+                          title="Mark email as verified"
+                          icon={MailCheck}
+                          disabled={busy}
+                          onClick={() => run(m._id, 'Verify',
+                            () => api.post(`/admin/users/${m._id}/verify-email`))}
+                        />
+                      )}
+                      {m.status === 'pending' && (
+                        <IconActionButton
+                          title="Resend invite email"
+                          icon={Mail}
+                          disabled={busy}
+                          onClick={() => run(m._id, 'Resend invite',
+                            () => api.post(`/admin/users/${m._id}/resend-invite`))}
+                        />
+                      )}
+                      {!isOwner && m.isActive !== false && (
+                        <IconActionButton
+                          title="Disable user (block login)"
+                          icon={UserX}
+                          tone="rose"
+                          disabled={busy}
+                          onClick={() => {
+                            if (window.confirm(`Disable ${m.email}? Their sessions will be revoked immediately.`)) {
+                              run(m._id, 'Disable',
+                                () => api.post(`/admin/users/${m._id}/set-active`, { isActive: false }));
+                            }
+                          }}
+                        />
+                      )}
+                      {m.isActive === false && (
+                        <IconActionButton
+                          title="Re-enable user"
+                          icon={UserCheck}
+                          tone="emerald"
+                          disabled={busy}
+                          onClick={() => run(m._id, 'Enable',
+                            () => api.post(`/admin/users/${m._id}/set-active`, { isActive: true }))}
+                        />
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {members.length === 0 && (
+              <tr><td colSpan={6} className="text-center py-3 text-muted-foreground">No members.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// Inline phone display + click-to-WhatsApp + tel: link. Used everywhere we
+// want to fast-track a call/chat without copy-pasting the number. The phone
+// itself is shown so the operator can also dial it from a desk phone.
+// stopPropagation is on the buttons so clicking them inside a clickable row
+// doesn't also trigger that row's onClick.
+function PhoneActions({ phone, compact = false }) {
+  const digits = phoneDigits(phone);
+  if (!phone || !digits) {
+    return compact ? null : <span className="text-muted-foreground/60">—</span>;
+  }
+  const stop = (e) => e.stopPropagation();
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {!compact && <span className="tabular-nums">{phone}</span>}
+      <a
+        href={`https://wa.me/${digits}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={stop}
+        title={`WhatsApp ${phone}`}
+        className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
+      >
+        <MessageCircle className="w-3 h-3" />
+      </a>
+      <a
+        href={`tel:${digits}`}
+        onClick={stop}
+        title={`Call ${phone}`}
+        className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-blue-50 text-blue-600 hover:bg-blue-100"
+      >
+        <Phone className="w-3 h-3" />
+      </a>
+    </span>
+  );
+}
+
+function IconActionButton({ icon: Icon, title, onClick, disabled, tone = 'slate' }) {
+  const tones = {
+    slate:   'text-slate-600 hover:bg-slate-100',
+    rose:    'text-rose-600 hover:bg-rose-50',
+    emerald: 'text-emerald-600 hover:bg-emerald-50',
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`p-1 rounded-md ${tones[tone]} disabled:opacity-40 disabled:cursor-not-allowed`}
+    >
+      <Icon className="w-3.5 h-3.5" />
+    </button>
+  );
+}
+
+// ─── Org modal: failed-webhook panel ────────────────────────────────────────
+
+function FailedWebhooksPanel({ rows }) {
+  return (
+    <div>
+      <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2 flex items-center gap-1.5">
+        <Webhook className="w-3 h-3 text-rose-500" /> Failed webhook deliveries ({rows.length})
+      </h3>
+      <div className="border border-rose-200/60 bg-rose-50/30 rounded-lg overflow-hidden">
+        <table className="w-full text-xs">
+          <thead className="bg-rose-100/40 text-[10px] uppercase tracking-wide text-rose-700">
+            <tr>
+              <th className="text-left py-1.5 px-3 font-medium">Event</th>
+              <th className="text-left py-1.5 px-3 font-medium">URL</th>
+              <th className="text-right py-1.5 px-3 font-medium">Status</th>
+              <th className="text-right py-1.5 px-3 font-medium">When</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((w) => (
+              <tr key={w._id} className="border-t border-rose-200/40">
+                <td className="py-2 px-3 font-mono text-foreground">{w.event}</td>
+                <td className="py-2 px-3 text-muted-foreground font-mono text-[10px] max-w-xs truncate" title={w.url}>{w.url}</td>
+                <td className="py-2 px-3 text-right text-rose-700 tabular-nums">
+                  {w.lastResponseStatus || 'err'} · {w.attempts}/{w.attempts}
+                </td>
+                <td className="py-2 px-3 text-right text-muted-foreground">{relTime(w.createdAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ─── Top-level: user search ─────────────────────────────────────────────────
+
+function UserSearchPanel({ onOpenOrg }) {
+  const [q, setQ] = useState('');
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const debounceRef = useRef(null);
+
+  useEffect(() => {
+    if (!q || q.length < 2) {
+      setItems([]);
+      return;
+    }
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const { data } = await api.get(`/admin/users?q=${encodeURIComponent(q)}`);
+        setItems(data.items || []);
+      } catch {
+        setItems([]);
+      } finally {
+        setLoading(false);
+      }
+    }, 300);
+    return () => clearTimeout(debounceRef.current);
+  }, [q]);
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-4 sm:p-5">
+      <div className="flex items-start justify-between gap-4 mb-3">
+        <div>
+          <h3 className="text-sm font-medium text-foreground flex items-center gap-1.5">
+            <Eye className="w-3.5 h-3.5 text-muted-foreground" /> Find a user
+          </h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Search by email or name across every org. Click a result to open that org's drill-down.
+          </p>
+        </div>
+      </div>
+      <div className="relative max-w-md">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+        <input
+          value={q}
+          onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          placeholder="e.g. jane@example.com"
+          className="pl-8 pr-3 py-2 text-sm rounded-lg border border-border bg-background w-full"
+        />
+        {open && q.length >= 2 && (
+          <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg max-h-72 overflow-y-auto z-10">
+            {loading && (
+              <div className="px-3 py-2 text-xs text-muted-foreground">Searching…</div>
+            )}
+            {!loading && items.length === 0 && (
+              <div className="px-3 py-2 text-xs text-muted-foreground">No users match.</div>
+            )}
+            {!loading && items.map((u) => (
+              <div
+                key={u._id}
+                className="px-3 py-2 hover:bg-muted/60 border-b border-border/50 last:border-0 flex items-center gap-2"
+              >
+                <button
+                  onClick={() => {
+                    if (u.organization?._id) {
+                      onOpenOrg(u.organization._id);
+                      setOpen(false);
+                    }
+                  }}
+                  className="text-left flex-1 min-w-0"
+                >
+                  <div className="text-sm text-foreground truncate">{u.email}</div>
+                  <div className="text-[11px] text-muted-foreground truncate">
+                    {u.organization?.name || '(no org)'} · {u.organization?.plan || '—'} · {u.role}
+                    {!u.isActive && ' · blocked'}
+                    {u.status === 'pending' && ' · pending'}
+                  </div>
+                </button>
+                {u.phone && <PhoneActions phone={u.phone} compact />}
+                <div className="text-[10px] text-muted-foreground shrink-0 tabular-nums w-12 text-right">
+                  {u.lastLogin ? relTime(u.lastLogin) : 'never'}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
