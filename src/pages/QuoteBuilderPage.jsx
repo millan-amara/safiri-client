@@ -893,6 +893,10 @@ export default function QuoteBuilderPage() {
   // hotelId / activityId / transportId), so anything since deleted from
   // inventory is skipped with a warning.
   const [repricing, setRepricing] = useState(false);
+  // Set by the currency picker; consumed by the effect below. Lets us
+  // distinguish a user-driven currency switch (must reprice) from initial
+  // load / deal-prefill (already priced in the loaded currency).
+  const [pendingCurrencyReprice, setPendingCurrencyReprice] = useState(false);
   const repriceAll = async () => {
     setRepricing(true);
     let priced = 0;
@@ -949,6 +953,18 @@ export default function QuoteBuilderPage() {
       setRepricing(false);
     }
   };
+
+  // Items snapshot their FX rate at pick-time, so switching the quote's
+  // display currency can't be done by relabeling — we re-run each pick
+  // against the new currency. We defer to an effect (rather than calling
+  // repriceAll from the onChange) so repriceAll's closure captures the
+  // committed quote state, not the pre-update one.
+  useEffect(() => {
+    if (pendingCurrencyReprice && !repricing) {
+      setPendingCurrencyReprice(false);
+      repriceAll();
+    }
+  }, [quote.pricing.currency, pendingCurrencyReprice, repricing]);
 
   const handleSave = async (status) => {
     if (!quote.title) { toast.error('Please add a title'); return; }
@@ -1290,7 +1306,15 @@ export default function QuoteBuilderPage() {
                 <label className="block text-xs font-medium text-muted-foreground mb-1">Currency</label>
                 <select
                   value={quote.pricing.currency}
-                  onChange={(e) => setQuote({ ...quote, pricing: { ...quote.pricing, currency: e.target.value } })}
+                  onChange={(e) => {
+                    const newCurrency = e.target.value;
+                    if (newCurrency === quote.pricing.currency) return;
+                    setQuote({ ...quote, pricing: { ...quote.pricing, currency: newCurrency } });
+                    const hasPricedItems = (quote.days || []).some(d =>
+                      d.hotel?.hotelId || d.transport?.transportId || (d.activities || []).length > 0
+                    );
+                    if (hasPricedItems) setPendingCurrencyReprice(true);
+                  }}
                   className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
                 >
                   <option value="USD">USD ($)</option>
