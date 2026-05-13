@@ -519,8 +519,9 @@ function OrgsTable({ onSelect, version }) {
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search name…"
-              className="pl-8 pr-3 py-1.5 text-sm rounded-lg border border-border bg-background w-44"
+              placeholder="Search name, email, phone…"
+              title="Phone search ignores formatting and the leading 0 / +254, so 0734…, +254 734…, and 734… all find the same number."
+              className="pl-8 pr-3 py-1.5 text-sm rounded-lg border border-border bg-background w-56"
             />
           </div>
           <select
@@ -587,13 +588,19 @@ function OrgsTable({ onSelect, version }) {
                         </span>
                       )}
                     </div>
-                    <div className="text-[11px] text-muted-foreground flex items-center gap-2 flex-wrap">
-                      <span>{o.owner?.email || '(no owner)'}</span>
-                      {/* Prefer the owner's personal phone — it's what they
-                          actually pick up. Falls back to the org's businessInfo
-                          phone (set in Settings) when the owner has none. */}
-                      <PhoneActions phone={o.owner?.phone || o.businessInfo?.phone} compact />
+                    <div className="text-[11px] text-muted-foreground">
+                      {o.owner?.email || '(no owner)'}
                     </div>
+                    {/* Surface the phone *digits* on the home row so you can
+                        WhatsApp/call without first clicking into the org. The
+                        owner's personal phone wins; the org's businessInfo
+                        phone (set in Settings) is the fallback. */}
+                    {(o.owner?.phone || o.businessInfo?.phone) && (
+                      <div className="text-[11px] text-muted-foreground/90 flex items-center gap-1.5 mt-0.5">
+                        <span className="tabular-nums">{o.owner?.phone || o.businessInfo?.phone}</span>
+                        <PhoneActions phone={o.owner?.phone || o.businessInfo?.phone} compact />
+                      </div>
+                    )}
                   </td>
                   <td className="py-2.5 pr-3">
                     <span
