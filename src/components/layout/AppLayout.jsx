@@ -30,7 +30,9 @@ import {
 import { useState, useEffect, useRef } from 'react';
 import SearchPalette from '../search/SearchPalette';
 
-const navItems = [
+// Main nav — every signed-in user sees these. Ordered by operator workflow:
+// dashboard → inventory → client work → automation → personal settings.
+const mainNavItems = [
   { path: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
   { path: '/partners', icon: Database, label: 'Partners' },
   { path: '/destinations', icon: MapPin, label: 'Destinations' },
@@ -38,10 +40,20 @@ const navItems = [
   { path: '/quotes', icon: FileText, label: 'Quotes' },
   { path: '/invoices', icon: Receipt, label: 'Invoices' },
   { path: '/automations', icon: Zap, label: 'Automations' },
-  { path: '/admin', icon: ShieldCheck, label: 'Operator', superAdminOnly: true, end: true },
-  { path: '/admin/library', icon: ImageIcon, label: 'Image Library', superAdminOnly: true },
   { path: '/settings', icon: Settings, label: 'Settings' },
 ];
+
+// Admin nav — superadmin only, rendered below a divider so it's visually
+// separated from the operator's day-to-day items.
+const adminNavItems = [
+  { path: '/admin', icon: ShieldCheck, label: 'Operator', end: true },
+  { path: '/admin/library', icon: ImageIcon, label: 'Image Library' },
+  { path: '/admin/search-logs', icon: Search, label: 'Search Logs' },
+];
+
+// Combined list used only for page-title derivation. Order doesn't matter
+// here; we just need every route to resolve to a label.
+const navItems = [...mainNavItems, ...adminNavItems];
 
 const bottomNavPaths = ['/', '/crm', '/quotes', '/partners'];
 const bottomNavItems = [
@@ -122,8 +134,11 @@ export default function AppLayout() {
           )}
         </div>
 
-        {/* Nav */}
-        <nav className="flex-1 py-4 px-3 space-y-1">
+        {/* Nav — overflow-y-auto so long lists (e.g. superadmin with the
+            extra Admin section) don't push the user/logout block below the
+            viewport at 100% zoom on shorter screens. The user section below
+            stays anchored. */}
+        <nav className="flex-1 min-h-0 overflow-y-auto py-4 px-3 space-y-1">
           {/* Search palette trigger (⌘K) */}
           <button
             onClick={() => setSearchOpen(true)}
@@ -142,7 +157,7 @@ export default function AppLayout() {
               </>
             )}
           </button>
-          {navItems.filter(item => !item.superAdminOnly || user?.isSuperAdmin).map(({ path, icon: Icon, label, end }) => (
+          {mainNavItems.map(({ path, icon: Icon, label, end }) => (
             <NavLink
               key={path}
               to={path}
@@ -161,7 +176,9 @@ export default function AppLayout() {
               {!collapsed && <span>{label}</span>}
             </NavLink>
           ))}
-          {/* Getting Started — re-opens dashboard onboarding card even after dismissal */}
+          {/* Getting Started — re-opens dashboard onboarding card even after
+              dismissal. Available to all users (not admin), so it sits with
+              the main nav, before the admin section. */}
           <button
             onClick={openGettingStarted}
             className={`
@@ -174,6 +191,37 @@ export default function AppLayout() {
             <Sparkles className="w-[18px] h-[18px] flex-shrink-0" />
             {!collapsed && <span>Getting started</span>}
           </button>
+
+          {/* Admin section — superadmin only, visually separated. */}
+          {user?.isSuperAdmin && (
+            <>
+              <div className={`pt-3 mt-2 border-t border-sand-200 ${collapsed ? 'mx-2' : 'mx-1'}`} />
+              {!collapsed && (
+                <div className="px-3 pt-1 text-[10px] uppercase tracking-wider font-semibold text-sand-500">
+                  Admin
+                </div>
+              )}
+              {adminNavItems.map(({ path, icon: Icon, label, end }) => (
+                <NavLink
+                  key={path}
+                  to={path}
+                  end={end}
+                  className={({ isActive }) => `
+                    flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
+                    transition-all duration-150
+                    ${isActive
+                      ? 'bg-amber-brand/10 text-amber-brand'
+                      : 'text-sand-600 hover:text-slate-brand hover:bg-sand-100'
+                    }
+                    ${collapsed ? 'justify-center' : ''}
+                  `}
+                >
+                  <Icon className="w-[18px] h-[18px] flex-shrink-0" />
+                  {!collapsed && <span>{label}</span>}
+                </NavLink>
+              ))}
+            </>
+          )}
         </nav>
 
         {/* User section */}
@@ -370,16 +418,19 @@ function MobileBottomNav({ onMoreClick, currentPath }) {
 }
 
 function MoreSheet({ user, logout, onClose, onOpenGettingStarted }) {
+  // Mobile "More" sheet groups the non-bottom-nav items. Mirrors the desktop
+  // sidebar structure: personal items first, admin items behind a divider.
   const moreItems = [
     { path: '/destinations', icon: MapPin, label: 'Destinations' },
     { path: '/invoices', icon: Receipt, label: 'Invoices' },
     { path: '/automations', icon: Zap, label: 'Automations' },
-    ...(user?.isSuperAdmin ? [
-      { path: '/admin', icon: ShieldCheck, label: 'Operator' },
-      { path: '/admin/library', icon: ImageIcon, label: 'Image Library' },
-    ] : []),
     { path: '/settings', icon: Settings, label: 'Settings' },
   ];
+  const adminMoreItems = user?.isSuperAdmin ? [
+    { path: '/admin', icon: ShieldCheck, label: 'Operator' },
+    { path: '/admin/library', icon: ImageIcon, label: 'Image Library' },
+    { path: '/admin/search-logs', icon: Search, label: 'Search Logs' },
+  ] : [];
 
   return (
     <div className="lg:hidden fixed inset-0 z-50 flex items-end animate-fade-in">
@@ -420,6 +471,27 @@ function MoreSheet({ user, logout, onClose, onOpenGettingStarted }) {
             </NavLink>
           ))}
         </div>
+        {adminMoreItems.length > 0 && (
+          <div className="border-t border-sand-200 py-2">
+            <div className="px-5 pt-1 pb-1.5 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">
+              Admin
+            </div>
+            {adminMoreItems.map(({ path, icon: Icon, label }) => (
+              <NavLink
+                key={path}
+                to={path}
+                onClick={onClose}
+                className={({ isActive }) => `
+                  flex items-center gap-3 px-5 py-3.5 text-sm transition-colors
+                  ${isActive ? 'bg-primary/10 text-primary font-semibold' : 'text-foreground hover:bg-muted'}
+                `}
+              >
+                <Icon className="w-5 h-5 flex-shrink-0" strokeWidth={1.8} />
+                {label}
+              </NavLink>
+            ))}
+          </div>
+        )}
         <div className="border-t border-sand-200 py-2">
           <button
             onClick={() => { onClose(); logout(); }}

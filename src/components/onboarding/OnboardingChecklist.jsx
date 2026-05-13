@@ -13,6 +13,13 @@ export default function OnboardingChecklist({ forceShow = false }) {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  // Always-wins dismissal flag for THIS view. forceShow lets the "Getting
+  // started" link re-open a previously-dismissed checklist (?onboarding=open
+  // in the URL), but once the operator clicks X in this view we want it gone
+  // regardless of the URL param. Without this, the X call updates server
+  // state but the visibility check below still sees forceShow=true and keeps
+  // rendering.
+  const [locallyDismissed, setLocallyDismissed] = useState(false);
 
   const refetch = async () => {
     try {
@@ -32,6 +39,7 @@ export default function OnboardingChecklist({ forceShow = false }) {
 
   if (loading) return null;
   if (!status) return null;
+  if (locallyDismissed) return null;
 
   const { items, progress, dismissed } = status;
   const allDone = progress.completed >= progress.total;
@@ -44,6 +52,7 @@ export default function OnboardingChecklist({ forceShow = false }) {
     try {
       await api.post('/onboarding/dismiss');
       setStatus({ ...status, dismissed: true });
+      setLocallyDismissed(true);
     } catch {
       toast.error('Could not hide');
     } finally {

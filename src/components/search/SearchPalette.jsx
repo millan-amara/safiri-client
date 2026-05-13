@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, X, Loader2, Sparkles, MapPin, Calendar, Users, Wallet, Tag, Globe, ArrowRight, Image as ImageIcon } from 'lucide-react';
+import { Search, X, Loader2, Sparkles, MapPin, Calendar, Users, Wallet, Tag, Globe, ArrowRight, Image as ImageIcon, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import api from '../../utils/api';
 import SearchResultCard from './SearchResultCard';
 
 const EXAMPLES = [
   'tented camp in Maasai Mara for 2 adults',
-  'lodge Amboseli July budget $5000 USD',
-  'game drive activity in Mara',
-  '4x4 transfer Nairobi to Maasai Mara',
+  'luxury lodge in Amboseli July budget $5000 USD',
+  'What\'s the cancellation policy for Mara Serena?',
+  'Hotels missing rate lists',
+  'Rate lists expiring this month',
 ];
 
 function formatDateRange(range) {
@@ -83,6 +84,56 @@ const TOPIC_LABELS = {
   amenities: 'Amenities',
   general: 'Overview',
 };
+
+function DiagnosticHeader({ label, totalCount, canonical }) {
+  return (
+    <div className="px-4 py-3 border-b border-sand-100 flex items-center gap-2">
+      <AlertTriangle className="w-4 h-4 text-amber-brand flex-shrink-0" />
+      <span className="text-sm font-semibold text-slate-brand">{label}</span>
+      <span className="text-xs text-sand-500">
+        · {totalCount} {totalCount === 1 ? 'item' : 'items'}{canonical ? ` in ${canonical}` : ''}
+      </span>
+    </div>
+  );
+}
+
+function DiagnosticItem({ item, onSelect }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(item)}
+      className="w-full text-left px-4 py-3 hover:bg-sand-50 transition-colors border-b border-sand-100 last:border-b-0 group flex items-start gap-3"
+    >
+      <div className="w-10 h-10 rounded-lg bg-sand-100 flex-shrink-0 overflow-hidden flex items-center justify-center">
+        {item.image
+          ? <img src={item.image} alt="" className="w-full h-full object-cover" />
+          : <ImageIcon className="w-4 h-4 text-sand-400" />}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-slate-brand truncate">{item.name}</span>
+          {item.destination && (
+            <span className="text-[11px] text-sand-500 truncate">· {item.destination}</span>
+          )}
+        </div>
+        <p className="mt-0.5 text-xs text-sand-600 line-clamp-2">{item.issueDetail}</p>
+      </div>
+      <ArrowRight className="w-4 h-4 text-sand-400 group-hover:text-amber-brand flex-shrink-0 mt-1 transition-colors" />
+    </button>
+  );
+}
+
+function DiagnosticClean({ label }) {
+  return (
+    <div className="px-4 py-10 text-center">
+      <div className="inline-flex w-10 h-10 rounded-full bg-green-50 text-green-600 items-center justify-center mb-3">
+        <CheckCircle2 className="w-5 h-5" />
+      </div>
+      <p className="text-sm text-slate-brand font-medium mb-1">Nothing to fix</p>
+      <p className="text-xs text-sand-600">No partners match the "{label}" check.</p>
+    </div>
+  );
+}
 
 function LookupAnswer({ lookup, answer, onView }) {
   return (
@@ -242,11 +293,14 @@ export default function SearchPalette({ open, onClose }) {
   };
 
   const isLookup = response?.intent === 'lookup';
+  const isDiagnostic = response?.intent === 'diagnostic';
   const hasLookupAnswer = isLookup && response.lookup;
   const hasLookupCandidates = isLookup && response.candidates?.length > 0;
+  const hasDiagnosticItems = isDiagnostic && response.items?.length > 0;
+  const diagnosticIsClean = isDiagnostic && response.items?.length === 0;
   const showExamples = !query.trim() && !loading;
-  const hasResults = !isLookup && response?.results?.length > 0;
-  const noResults = !isLookup && response && !response.needsClarification && response.results?.length === 0;
+  const hasResults = !isLookup && !isDiagnostic && response?.results?.length > 0;
+  const noResults = !isLookup && !isDiagnostic && response && !response.needsClarification && response.results?.length === 0;
 
   return (
     <div
@@ -282,8 +336,8 @@ export default function SearchPalette({ open, onClose }) {
           </button>
         </div>
 
-        {/* Parsed summary chips — search intent only. Lookup mode has its own header. */}
-        {!isLookup && <ParsedSummary parsed={response?.parsed} quoteCurrency={response?.quoteCurrency} />}
+        {/* Parsed summary chips — search intent only. Lookup and diagnostic modes have their own headers. */}
+        {!isLookup && !isDiagnostic && <ParsedSummary parsed={response?.parsed} quoteCurrency={response?.quoteCurrency} />}
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto">
@@ -310,6 +364,29 @@ export default function SearchPalette({ open, onClose }) {
                 Costs 1 AI credit per search. Pricing is computed from your own rate lists — no AI guesses.
               </p>
             </div>
+          )}
+
+          {/* Diagnostic — inventory audit results */}
+          {isDiagnostic && (
+            <>
+              <DiagnosticHeader
+                label={response.label}
+                totalCount={response.totalCount || 0}
+                canonical={response.canonical}
+              />
+              {hasDiagnosticItems && (
+                <div>
+                  {response.items.map((item) => (
+                    <DiagnosticItem
+                      key={`${item.type}-${item.id}-${item.rateListName || ''}`}
+                      item={item}
+                      onSelect={(it) => handleSelect({ id: it.id, type: it.type })}
+                    />
+                  ))}
+                </div>
+              )}
+              {diagnosticIsClean && <DiagnosticClean label={response.label} />}
+            </>
           )}
 
           {/* Lookup answer — single-partner Q&A response */}
