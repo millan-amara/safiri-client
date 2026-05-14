@@ -258,8 +258,11 @@ export default function AppLayout() {
         </button>
       </aside>
 
-      {/* Main content */}
-      <main className="flex-1 min-w-0">
+      {/* overflow-x-clip: any page-level horizontal overflow anchors the
+          fixed bottom nav's right edge to the document, not the viewport —
+          pushing "More" off-screen and (on iOS Safari) breaking fixed
+          positioning on vertical scroll. Internal scrollers keep their own. */}
+      <main className="flex-1 min-w-0 overflow-x-clip">
         {/* Mobile top bar */}
         <MobileTopBar
           organization={organization}
