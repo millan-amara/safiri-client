@@ -212,38 +212,50 @@ export default function SearchPalette({ open, onClose }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  // Debounced search. The reqId guards against an earlier-but-slower response
-  // overwriting a later result if the user typed faster than the network.
+  // Clearing the input resets the response so the empty-state examples come
+  // back. We do NOT auto-search on every keystroke — each search costs ~2 AI
+  // credits (parser + rationale or lookup-answer) so typing-as-you-search
+  // would burn through quota fast. Search fires only via Enter or the submit
+  // button below; see runSearch.
   useEffect(() => {
     if (!open) return;
-    const trimmed = query.trim();
-    if (!trimmed) {
+    if (!query.trim()) {
       setResponse(null);
       setLoading(false);
       setError(null);
-      return;
     }
+  }, [query, open]);
+
+  // The actual search call. Invoked from the form's onSubmit (Enter or submit
+  // button click). The reqId guards against an earlier-but-slower response
+  // overwriting a later submission.
+  const runSearch = async (raw) => {
+    const trimmed = (raw ?? '').trim();
+    if (!trimmed) return;
     setLoading(true);
     setError(null);
     const myId = ++reqIdRef.current;
-    const timer = setTimeout(async () => {
-      try {
-        const res = await api.post('/search', { query: trimmed });
-        if (myId !== reqIdRef.current) return;
-        setResponse(res.data);
-      } catch (err) {
-        if (myId !== reqIdRef.current) return;
-        // 402 paywall is already toasted by the global axios interceptor.
-        if (err.response?.status !== 402) {
-          setError(err.response?.data?.message || 'Search failed.');
-        }
-        setResponse(null);
-      } finally {
-        if (myId === reqIdRef.current) setLoading(false);
+    try {
+      const res = await api.post('/search', { query: trimmed });
+      if (myId !== reqIdRef.current) return;
+      setResponse(res.data);
+    } catch (err) {
+      if (myId !== reqIdRef.current) return;
+      // 402 paywall is already toasted by the global axios interceptor.
+      if (err.response?.status !== 402) {
+        setError(err.response?.data?.message || 'Search failed.');
       }
-    }, 350);
-    return () => clearTimeout(timer);
-  }, [query, open]);
+      setResponse(null);
+    } finally {
+      if (myId === reqIdRef.current) setLoading(false);
+    }
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (loading) return;
+    runSearch(query);
+  };
 
   // After the main search returns results, fetch one-line rationales for the
   // top 3. Reference-equality on the results array guards against a stale
@@ -281,7 +293,11 @@ export default function SearchPalette({ open, onClose }) {
         setRationalesLoading(false);
       }
     })();
-  }, [response, open, query]);
+    // Intentionally NOT depending on `query`: once results land, the
+    // rationale should fetch once and stay locked to those results, even if
+    // the operator starts typing a new query before submitting it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [response, open]);
 
   if (!open) return null;
 
@@ -311,8 +327,10 @@ export default function SearchPalette({ open, onClose }) {
         className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl flex flex-col max-h-[80vh] overflow-hidden animate-scale-in"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Input */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-sand-200">
+        {/* Input — submit on Enter or button click. Auto-search-on-type was
+            burning ~2 AI credits per keystroke pause; explicit submit means
+            one search = one billable set of calls. */}
+        <form onSubmit={handleSubmit} className="flex items-center gap-2 px-4 py-3 border-b border-sand-200">
           <Search className="w-4 h-4 text-sand-500 flex-shrink-0" />
           <input
             ref={inputRef}
@@ -320,21 +338,35 @@ export default function SearchPalette({ open, onClose }) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Ask about your hotels, activities, transport, packages…"
-            className="flex-1 bg-transparent outline-none text-sm text-slate-brand placeholder:text-sand-400"
+            className="flex-1 min-w-0 bg-transparent outline-none text-sm text-slate-brand placeholder:text-sand-400"
+            // Hint to mobile soft keyboards that Enter == submit (renders the
+            // key as "Search" / "Go" on most platforms instead of "Done").
+            enterKeyHint="search"
           />
           {loading && <Loader2 className="w-4 h-4 text-sand-500 animate-spin flex-shrink-0" />}
-          <kbd className="hidden sm:inline-flex text-[10px] font-mono px-1.5 py-0.5 rounded bg-sand-100 text-sand-600 border border-sand-200">
+          {/* Submit — disabled when the input is empty or a request is in
+              flight. Visible label on sm+, icon only on phones to save room. */}
+          <button
+            type="submit"
+            disabled={!query.trim() || loading}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-amber-brand text-white text-xs font-medium hover:bg-amber-brand/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+            aria-label="Search"
+          >
+            <span className="hidden sm:inline">Search</span>
+            <ArrowRight className="w-3 h-3" />
+          </button>
+          <kbd className="hidden sm:inline-flex text-[10px] font-mono px-1.5 py-0.5 rounded bg-sand-100 text-sand-600 border border-sand-200 flex-shrink-0">
             esc
           </kbd>
           <button
             type="button"
             onClick={onClose}
-            className="p-1 rounded-md text-sand-500 hover:text-slate-brand hover:bg-sand-100"
+            className="p-1 rounded-md text-sand-500 hover:text-slate-brand hover:bg-sand-100 flex-shrink-0"
             aria-label="Close"
           >
             <X className="w-4 h-4" />
           </button>
-        </div>
+        </form>
 
         {/* Parsed summary chips — search intent only. Lookup and diagnostic modes have their own headers. */}
         {!isLookup && !isDiagnostic && <ParsedSummary parsed={response?.parsed} quoteCurrency={response?.quoteCurrency} />}
@@ -353,7 +385,7 @@ export default function SearchPalette({ open, onClose }) {
                   <button
                     key={ex}
                     type="button"
-                    onClick={() => setQuery(ex)}
+                    onClick={() => { setQuery(ex); runSearch(ex); }}
                     className="block w-full text-left text-sm text-sand-700 hover:text-slate-brand hover:bg-sand-50 px-3 py-2 rounded-lg transition-colors"
                   >
                     {ex}
@@ -413,13 +445,18 @@ export default function SearchPalette({ open, onClose }) {
                     onClick={() => {
                       // Re-issue the same query but with the canonical name so
                       // the parser resolves to a single subject this time.
+                      // Auto-submit since "I want to pick this one" is the
+                      // operator's clear intent.
                       const subj = response.parsed?.subjectName;
+                      let nextQuery;
                       if (subj && query.toLowerCase().includes(subj.toLowerCase())) {
                         const re = new RegExp(subj.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-                        setQuery(query.replace(re, c.name));
+                        nextQuery = query.replace(re, c.name);
                       } else {
-                        setQuery(`${query} (${c.name})`);
+                        nextQuery = `${query} (${c.name})`;
                       }
+                      setQuery(nextQuery);
+                      runSearch(nextQuery);
                     }}
                     className="w-full flex items-center gap-3 text-left px-3 py-2 rounded-lg hover:bg-sand-50 transition-colors"
                   >
