@@ -10,6 +10,7 @@ import {
   Truck, DollarSign, Save, Send, Eye, ChevronDown, ChevronUp,
   Sparkles, X, Calendar, Users as UsersIcon, Copy, Image as ImageIcon,
   Coffee, Sun, Sunset, Star, EyeOff, CheckCircle, Clock, AlertTriangle,
+  Link2, MoreHorizontal,
 } from 'lucide-react';
 
 // Server reason codes → operator-friendly toast text. The companion warning
@@ -25,6 +26,120 @@ const humanizeRateError = (code) => RATE_ERROR_MESSAGES[code] || `Pricing failed
 // Snapshot of the inputs that drove a price call, stored on the item snapshot
 // so we can later detect when the quote header has drifted away from them.
 // Hotels depend on the check-in date; activities/transport don't.
+
+// The consecutive run of days sharing one hotel that `dayIndex` belongs to.
+// "Same hotel" uses the same key as the pricing rollup (#1.2) and the
+// renderer's eachStaySegment: hotelId, falling back to name. Returns null
+// when the day has no hotel. { start, end } are 0-based inclusive indices;
+// length is the night count used as the resolver's stayNights so
+// length-of-stay tiers and minNights/maxNights conditions resolve against
+// the WHOLE stay even though each night is priced in its own window.
+const stayKeyOfDay = (d) => (d?.hotel ? `${d.hotel.hotelId || d.hotel.name}` : null);
+const stayRangeAt = (days, dayIndex) => {
+  const list = days || [];
+  const key = stayKeyOfDay(list[dayIndex]);
+  if (!key) return null;
+  let start = dayIndex;
+  while (start - 1 >= 0 && stayKeyOfDay(list[start - 1]) === key) start--;
+  let end = dayIndex;
+  while (end + 1 < list.length && stayKeyOfDay(list[end + 1]) === key) end++;
+  return { start, end, length: end - start + 1, key };
+};
+
+// Normalize an explicit room split to a stable shape, or null when the
+// operator left it blank (→ resolver infers the allocation). Used both
+// for the price-stay payload and the staleness fingerprint so they agree.
+const normalizeRooms = (rooms) => {
+  const s = Math.max(0, Math.floor(Number(rooms?.singles) || 0));
+  const d = Math.max(0, Math.floor(Number(rooms?.doubles) || 0));
+  const t = Math.max(0, Math.floor(Number(rooms?.triples) || 0));
+  const q = Math.max(0, Math.floor(Number(rooms?.quads) || 0));
+  return (s || d || t || q) ? { singles: s, doubles: d, triples: t, quads: q } : null;
+};
+
+// Symmetric, case-insensitive destination match. "Mara" should match a
+// hotel whose destination is "Maasai Mara" AND vice-versa — the old
+// one-directional `.includes` rejected the shorter-string case, so
+// operators thought they had no inventory. Empty location = match all.
+const destMatch = (a, b) => {
+  const x = String(a || '').trim().toLowerCase();
+  const y = String(b || '').trim().toLowerCase();
+  if (!x || !y) return false;
+  return x.includes(y) || y.includes(x);
+};
+
+// Distinct room types offered by a hotel partner doc, across its active
+// rate lists' seasons. Drives the per-stay room-type dropdown (#2.1).
+const roomTypesForHotel = (hotelDoc) => {
+  if (!hotelDoc) return [];
+  const set = new Set();
+  for (const list of (hotelDoc.rateLists || [])) {
+    if (list.isActive === false) continue;
+    for (const season of (list.seasons || [])) {
+      for (const r of (season.rooms || [])) {
+        if (r?.roomType) set.add(r.roomType);
+      }
+    }
+  }
+  return [...set];
+};
+
+// Per-night pass-through units accrue every night; everything else
+// (per_person_per_entry, flat, or any unrecognized unit) is a one-shot
+// charge billed once per stay. Mirrors QuoteRenderer.collectFees and the
+// PDF template so the operator total and client-facing display agree.
+const PER_NIGHT_PT_UNITS = ['per_person_per_day', 'per_person_per_night', 'per_room_per_night'];
+
+// Mandatory pass-through total (quote currency, face value) attributable
+// to day `index`, stay-aware: per-night units every night; one-shot units
+// only on the day that starts a new consecutive same-hotel run. Single
+// source of truth shared by the pricing rollup and the per-day card chip
+// (#3.6) so the two can never drift. Equivalent to the rollup's running
+// prevStayKey because that key is reassigned to every day unconditionally,
+// so it always equals the immediately-previous day's stay key.
+const dayPassThroughFace = (days, index) => {
+  const day = days?.[index];
+  const fees = day?.hotel?.passThroughFees;
+  if (!fees?.length) return 0;
+  const key = day.hotel ? `${day.hotel.hotelId || day.hotel.name}` : null;
+  const prev = index > 0 ? days[index - 1] : null;
+  const prevKey = prev?.hotel ? `${prev.hotel.hotelId || prev.hotel.name}` : null;
+  const startsNewStay = key !== null && key !== prevKey;
+  return fees
+    .filter(f => f.mandatory !== false)
+    .filter(f => PER_NIGHT_PT_UNITS.includes(f.unit) || startsNewStay)
+    .reduce((s, f) => s + (f.amountInQuoteCurrency || 0), 0);
+};
+
+// Lowest per-person-sharing across a hotel's active rate lists (any
+// season/room), for the picker's "cheapest" sort (#2.4). Infinity when
+// nothing priced so such hotels sort last.
+const cheapestPerPersonOf = (hotelDoc) => {
+  let min = Infinity;
+  for (const list of (hotelDoc?.rateLists || [])) {
+    if (list.isActive === false) continue;
+    for (const season of (list.seasons || [])) {
+      for (const r of (season.rooms || [])) {
+        const v = Number(r?.perPersonSharing) || 0;
+        if (v > 0 && v < min) min = v;
+      }
+    }
+  }
+  return min;
+};
+
+// Distinct meal plans offered by a hotel partner doc across its active
+// rate lists. Drives the per-stay meal-plan dropdown (#3.12).
+const mealPlansForHotel = (hotelDoc) => {
+  if (!hotelDoc) return [];
+  const set = new Set();
+  for (const list of (hotelDoc.rateLists || [])) {
+    if (list.isActive === false) continue;
+    if (list.mealPlan) set.add(list.mealPlan);
+  }
+  return [...set];
+};
+
 const hotelPricingInputs = (quote, dayIndex) => {
   const checkIn = quote.startDate ? new Date(quote.startDate) : new Date();
   checkIn.setDate(checkIn.getDate() + dayIndex);
@@ -35,6 +150,13 @@ const hotelPricingInputs = (quote, dayIndex) => {
     clientType: quote.clientType,
     nationality: quote.nationality,
     quoteCurrency: quote.pricing.currency,
+    // Stay length feeds LoS tiers / minNights conditions. Tracking it here
+    // means shortening or splitting a stay (remove/move/duplicate a day)
+    // marks the hotel stale so the "Reprice all" banner refreshes it.
+    stayNights: stayRangeAt(quote.days || [], dayIndex)?.length || 1,
+    // Explicit room split changes which occupancy column the resolver
+    // prices; track it so editing the split flags hotels stale.
+    rooms: normalizeRooms(quote.travelers?.rooms),
   };
 };
 const paxPricingInputs = (quote) => ({
@@ -63,7 +185,7 @@ export default function QuoteBuilderPage() {
     tourType: 'private',
     contact: '',
     deal: '',
-    travelers: { adults: 2, children: 0, childAges: [] },
+    travelers: { adults: 2, children: 0, childAges: [], rooms: { singles: 0, doubles: 0, triples: 0, quads: 0 } },
     startDate: '',
     endDate: '',
     startPoint: 'Nairobi',
@@ -118,6 +240,31 @@ export default function QuoteBuilderPage() {
   const [saving, setSaving] = useState(false);
   const [showPackagePicker, setShowPackagePicker] = useState(false);
 
+  // Skeleton while an existing quote is fetched. Without this the form
+  // renders with empty defaults then pops to populated once the GET
+  // resolves — it looks broken and the operator can start typing into a
+  // form that's about to be overwritten. New quotes need no fetch.
+  const [loading, setLoading] = useState(!!id);
+
+  // Styled replacements for native prompt()/confirm() (those are unstyled,
+  // browser-blockable, and unusable on mobile). `confirmDialog` is a
+  // generic { title, message, confirmLabel, tone, onConfirm } descriptor;
+  // `templateModal` carries the Save-as-Template form fields.
+  const [confirmDialog, setConfirmDialog] = useState(null);
+  const [templateModal, setTemplateModal] = useState(null);
+  // Header overflow ("⋯") menu for rare actions, so the action row isn't
+  // a wall of equal-weight buttons.
+  const [overflowOpen, setOverflowOpen] = useState(false);
+
+  // Unsaved-changes guard. savedRef holds a JSON snapshot of the last
+  // saved/loaded state; quoteRef mirrors the latest quote so the
+  // beforeunload handler — which can't read React state — can diff it.
+  const quoteRef = useRef(quote);
+  const savedRef = useRef(null);
+  useEffect(() => { quoteRef.current = quote; });
+  const isDirty = () => savedRef.current !== null
+    && JSON.stringify(quoteRef.current) !== savedRef.current;
+
   // Load partner data
   useEffect(() => {
     Promise.all([
@@ -145,8 +292,23 @@ export default function QuoteBuilderPage() {
   // (description, images, amenities, etc.) so the share page renders properly.
   // Package-level metadata (tier, cancellation, deposit, booking terms) is
   // stashed on quote.packageSnapshot for the policy blocks to render.
-  const applyPackage = async (pkg) => {
-    if (quote.days?.length > 0 && !confirm('This will replace your current itinerary. Continue?')) return;
+  // Public entry: gate the destructive replace behind a styled confirm
+  // when the operator already has an itinerary; otherwise apply directly.
+  const applyPackage = (pkg) => {
+    if (quote.days?.length > 0) {
+      setConfirmDialog({
+        title: 'Replace itinerary?',
+        message: 'Applying this package will replace your current itinerary. This can\'t be undone.',
+        confirmLabel: 'Replace',
+        tone: 'danger',
+        onConfirm: () => { setConfirmDialog(null); doApplyPackage(pkg); },
+      });
+      return;
+    }
+    doApplyPackage(pkg);
+  };
+
+  const doApplyPackage = async (pkg) => {
     try {
       const { data } = await api.post(`/partners/packages/${pkg._id}/price`, {
         adults: quote.travelers.adults,
@@ -215,6 +377,7 @@ export default function QuoteBuilderPage() {
           transport: null,
           images: [],
           dayCost: 0,   // package is flat-priced; per-day cost tracked as one line item
+          isItemized: true,  // the package line item drives the total for these days
         });
       }
 
@@ -274,12 +437,20 @@ export default function QuoteBuilderPage() {
           // any prior line items (including a previously-applied package's
           // line) would otherwise stack and double the displayed total. If
           // the operator has extras to bill, they add them after applying.
+          //
+          // Line items are stored at client-facing (post-markup) prices —
+          // the pricing useEffect sums them directly into totalPrice with
+          // no further margin, and the renderer / PDF / invoiceBuilder all
+          // consume them at face value. Multiply the package's source-
+          // currency-converted cost by the current global markup so the
+          // displayed total matches what the operator expects.
           lineItems: [
             {
               description: `${data.package?.name || pkg.name} — ${data.tier.minPax}-${data.tier.maxPax} pax package (${quote.travelers.adults} adult${quote.travelers.adults === 1 ? '' : 's'}${data.childAges.length ? ', ' + data.childAges.length + ' child' + (data.childAges.length === 1 ? '' : 'ren') : ''})`,
               quantity: 1,
-              unitPrice: Math.round(data.subtotalInQuoteCurrency),
-              total: Math.round(data.subtotalInQuoteCurrency),
+              unitPrice: Math.round(data.subtotalInQuoteCurrency * (1 + (quote.pricing.marginPercent || 0) / 100)),
+              total: Math.round(data.subtotalInQuoteCurrency * (1 + (quote.pricing.marginPercent || 0) / 100)),
+              source: 'package',
             },
           ],
         },
@@ -304,23 +475,51 @@ export default function QuoteBuilderPage() {
         // reopen, making the user think the link didn't persist.
         const contactId = data.contact?._id || data.contact || '';
         const dealId = data.deal?._id || data.deal || '';
-        setQuote({
+        const loaded = {
           ...data,
           contact: contactId,
           deal: dealId,
           days: data.days || [],
           startDate: data.startDate?.split('T')[0] || '',
           endDate: data.endDate?.split('T')[0] || '',
-        });
+        };
+        setQuote(loaded);
+        // Baseline for the unsaved-changes guard. The pricing effect may
+        // recompute totals on mount; when they match what was stored the
+        // JSON is identical so this stays accurate, and any genuine drift
+        // fails safe (warns rather than silently discards).
+        savedRef.current = JSON.stringify(loaded);
         // Legacy quotes saved with only a contact (no deal) → start in
         // contact-only mode so the operator sees what's actually linked.
         if (!dealId && contactId) setLinkMode('contact');
       }).catch(() => {
         toast.error('Quote not found');
         navigate('/quotes');
-      });
+      }).finally(() => setLoading(false));
     }
   }, [id]);
+
+  // New quote: baseline the unsaved-changes snapshot once on mount so an
+  // untouched blank form never triggers the discard warning. A deal-sourced
+  // prefill (the effect below) counts as a change — that's intentional, the
+  // operator almost always wants to keep a deal-derived quote.
+  useEffect(() => {
+    if (!id) savedRef.current = JSON.stringify(quoteRef.current);
+  }, []);
+
+  // Warn before the browser unloads (tab close / refresh / external nav)
+  // with unsaved edits. In-app navigation is guarded separately on the
+  // back button; sidebar links aren't blockable here because the app uses
+  // BrowserRouter, not a data router (useBlocker is unavailable).
+  useEffect(() => {
+    const onBeforeUnload = (e) => {
+      if (!isDirty()) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, []);
 
   // New quote arriving from a deal page (`/quotes/new?deal=<id>`) — pre-fill
   // the deal link, derived contact, travel dates, and party size from the
@@ -363,36 +562,59 @@ export default function QuoteBuilderPage() {
   //
   // Three buckets feed the total:
   //   1. day.dayCost — operator-resold inventory (hotel rate, activities,
-  //      transport). Always marked up at the per-day or global margin.
-  //   2. mandatory pass-through fees on each day's hotel snapshot (park fees,
-  //      conservancy access). Marked up only if quote.pricing.markupPassThroughFees
-  //      is true; otherwise billed at face value. These were previously dropped
-  //      from the total entirely, under-pricing safari quotes by ~$80–120 / pax / night.
-  //   3. quote.pricing.lineItems — packages applied as a single line item,
-  //      manual extras. Marked up at the global margin (per-day overrides do
-  //      not apply because line items are not bound to a day).
+  //      transport). Marked up at the per-day or global margin.
+  //      SKIPPED when day.isItemized is true (the day's costs are already
+  //      represented inside pricing.lineItems, e.g. by Auto-generate or
+  //      by applyPackage). Without this guard, the same costs would be
+  //      counted twice — once via dayCost and once via lineItems.
+  //   2. mandatory pass-through fees on each day's hotel snapshot (park
+  //      fees, conservancy access). Marked up only when
+  //      quote.pricing.markupPassThroughFees is true; otherwise billed
+  //      at face value. Always applied — PT fees are surfaced as a
+  //      separate section by the renderer and are intentionally not
+  //      duplicated by Auto-generate.
+  //   3. quote.pricing.lineItems — these are CLIENT-FACING totals (the
+  //      schema's `unitPrice` doc says "marked-up price", and the renderer
+  //      / PDF / invoiceBuilder all consume them at face value). We sum
+  //      them into totalPrice directly with no further markup. For the
+  //      operator's "Subtotal (cost)" sidebar display, we reverse the
+  //      global markup as a best-effort cost estimate; it is approximate
+  //      when per-day overrides are mixed in but is correct on average.
+  //
+  // Margin slider caveat: changing marginPercent updates the day-rollup
+  // contribution immediately but does NOT scale already-generated line
+  // items. The "Re-generate" affordance in the line items editor is the
+  // operator's path to refresh prices after a margin change.
   useEffect(() => {
     const globalMargin = quote.pricing.marginPercent;
     const markupFees = quote.pricing.markupPassThroughFees !== false;
     let subtotal = 0;
     let totalPrice = 0;
-    (quote.days || []).forEach(day => {
-      const cost = day.dayCost || 0;
+    // Stay-aware pass-through accrual is centralised in dayPassThroughFace
+    // (one-shot fees once per consecutive same-hotel run, per-night fees
+    // every night). The day card chip (#3.6) uses the same helper so the
+    // sum of per-day costs reconciles with this rollup.
+    const days = quote.days || [];
+    days.forEach((day, i) => {
       const margin = day.marginOverride != null ? day.marginOverride : globalMargin;
-      subtotal += cost;
-      totalPrice += cost * (1 + margin / 100);
-
-      const ptTotal = (day.hotel?.passThroughFees || [])
-        .filter(f => f.mandatory !== false)
-        .reduce((s, f) => s + (f.amountInQuoteCurrency || 0), 0);
+      if (!day.isItemized) {
+        const cost = day.dayCost || 0;
+        subtotal += cost;
+        totalPrice += cost * (1 + margin / 100);
+      }
+      const ptTotal = dayPassThroughFace(days, i);
       subtotal += ptTotal;
       totalPrice += markupFees ? ptTotal * (1 + margin / 100) : ptTotal;
     });
 
     const lineItemsTotal = (quote.pricing.lineItems || [])
       .reduce((s, li) => s + (Number(li.total) || 0), 0);
-    subtotal += lineItemsTotal;
-    totalPrice += lineItemsTotal * (1 + globalMargin / 100);
+    // Line items are already client-priced — add to total directly.
+    totalPrice += lineItemsTotal;
+    // For the subtotal display only, reverse the global markup to land
+    // back in cost-basis terms. With a 0% margin this is a no-op.
+    const reverseMarkup = globalMargin > 0 ? 1 / (1 + globalMargin / 100) : 1;
+    subtotal += lineItemsTotal * reverseMarkup;
 
     const marginAmount = totalPrice - subtotal;
     const totalPax = quote.travelers.adults + quote.travelers.children;
@@ -407,6 +629,20 @@ export default function QuoteBuilderPage() {
       },
     }));
   }, [quote.days, quote.pricing.marginPercent, quote.pricing.markupPassThroughFees, quote.pricing.lineItems, quote.travelers]);
+
+  // Safety net: when lineItems is fully empty AND any day is still flagged
+  // as itemized, clear the flag so day-cost rollup resumes. Handles the
+  // case where the operator removes line items one-by-one via the X button
+  // without using the explicit "Reset to day rollup" button.
+  useEffect(() => {
+    const items = quote.pricing.lineItems || [];
+    if (items.length > 0) return;
+    if (!(quote.days || []).some(d => d.isItemized)) return;
+    setQuote(prev => ({
+      ...prev,
+      days: prev.days.map(d => (d.isItemized ? { ...d, isItemized: false } : d)),
+    }));
+  }, [quote.pricing.lineItems, quote.days]);
 
   // Day helpers
   const addDay = (afterIdx = null) => {
@@ -533,6 +769,7 @@ export default function QuoteBuilderPage() {
     days.forEach((d, i) => d.dayNumber = i + 1);
     setQuote({ ...quote, days });
     setExpandedDay(index + 1);
+    toast('Day duplicated — pricing was cleared. Re-confirm the hotel/activities to re-price for the new date.', { icon: 'ℹ️', duration: 5000 });
   };
 
   // Pure price + snapshot construction — no state mutation. Returns
@@ -546,6 +783,13 @@ export default function QuoteBuilderPage() {
     // Snapshot the pricing inputs so the staleness banner can detect when the
     // operator has shifted the quote header (dates / pax / clientType / etc.)
     // since this hotel was priced.
+    const stayNights = Number.isFinite(opts.stayNights) && opts.stayNights >= 1
+      ? Math.floor(opts.stayNights)
+      : 1;
+    // Explicit room split (or null = let the resolver infer). Sent to the
+    // API only when set, and recorded in the staleness fingerprint so
+    // editing the split flags affected hotels for re-pricing.
+    const roomsConfig = normalizeRooms(quote.travelers?.rooms);
     const pricingInputs = {
       checkIn: checkIn.toISOString().slice(0, 10),
       adults: quote.travelers.adults,
@@ -553,6 +797,10 @@ export default function QuoteBuilderPage() {
       clientType: quote.clientType,
       nationality: quote.nationality,
       quoteCurrency: quote.pricing.currency,
+      // Recorded so the staleness check (hotelPricingInputs) flags this
+      // snapshot when the stay grows/shrinks and the LoS tier may change.
+      stayNights,
+      rooms: roomsConfig,
     };
 
     const baseSnapshot = {
@@ -582,6 +830,13 @@ export default function QuoteBuilderPage() {
         preferredMealPlan: opts.preferredMealPlan,
         preferredRoomType: opts.preferredRoomType,
         quoteCurrency: quote.pricing.currency,
+        // True stay length so the resolver applies the right LoS tier and
+        // evaluates minNights/maxNights conditions even though this call
+        // prices a single night's window.
+        stayNights,
+        // Authoritative room split when the operator set one; omitted
+        // (undefined) when blank so the resolver infers the allocation.
+        ...(roomsConfig ? { rooms: roomsConfig } : {}),
       });
 
       if (data.ok) {
@@ -641,25 +896,86 @@ export default function QuoteBuilderPage() {
     }
   };
 
-  // Pick a hotel for a day and let the server's rate resolver compute the
-  // nightly cost against the quote's clientType + party + currency. Falls
-  // back to a thin snapshot if pricing can't be resolved.
-  const selectHotelForDay = async (dayIndex, hotel, opts = {}) => {
-    const checkIn = quote.startDate ? new Date(quote.startDate) : new Date();
-    checkIn.setDate(checkIn.getDate() + dayIndex);
-    const result = await priceHotelForCheckIn(hotel, checkIn, opts);
-    if (result.error) toast.error(humanizeRateError(result.error), { duration: 6000 });
-    if (result.warnings.length) result.warnings.slice(0, 2).forEach(w => toast(w, { icon: '⚠️', duration: 6000 }));
-    updateDay(dayIndex, { hotel: result.snapshot, roomType: result.roomType });
+  // Recompute a day's cost from its priced snapshots. Mirrors the inline
+  // logic in updateDay so the run-pricing path stays in sync with it.
+  const recomputeDayCost = (day) => {
+    const hotelCost = day.hotel?.ratePerNightInQuoteCurrency || day.hotel?.ratePerNight || 0;
+    const actCost = day.activities?.reduce((s, a) => s + (a.totalCostInQuoteCurrency ?? a.totalCost ?? 0), 0) || 0;
+    const transCost = day.transport?.totalCostInQuoteCurrency ?? day.transport?.totalCost ?? 0;
+    return hotelCost + actCost + transCost;
   };
 
-  // Extend an existing hotel-night by inserting another day after it and
-  // re-pricing the same partner hotel for the new date. Restores the
-  // multi-night convenience without inheriting a stale per-night rate
-  // (different season / stay-tier may apply to the new night). Composes the
-  // insert + the priced snapshot into a single setQuote call to dodge the
-  // closure-staleness race that would lose the insert if updateDay ran on
-  // top of an outdated quote.days.
+  // Price every night of the consecutive same-hotel run that contains
+  // `anchorIndex` within `baseDays`, passing the run length as stayNights
+  // so length-of-stay tiers and minNights/maxNights conditions resolve for
+  // the WHOLE stay (the #1.1 fix). Pure: returns the priced snapshots; the
+  // caller decides how to commit (in-place vs. with a structural insert).
+  // All days in a run share one hotel by definition, so a single partner
+  // doc (`hotelDoc`) prices the whole run.
+  const priceRun = async (baseDays, anchorIndex, hotelDoc, opts = {}) => {
+    const range = stayRangeAt(baseDays, anchorIndex);
+    if (!range) return { range: null, results: [] };
+    const startDate = quote.startDate ? new Date(quote.startDate) : new Date();
+    const results = [];
+    for (let idx = range.start; idx <= range.end; idx++) {
+      const checkIn = new Date(startDate);
+      checkIn.setDate(checkIn.getDate() + idx);
+      const r = await priceHotelForCheckIn(hotelDoc, checkIn, { ...opts, stayNights: range.length });
+      results.push({ idx, ...r });
+    }
+    return { range, results };
+  };
+
+  // Apply priced-run results onto a (copied) days array in place, refreshing
+  // each day's hotel snapshot, roomType, and recomputed dayCost.
+  const applyPricedRun = (days, results) => {
+    for (const { idx, snapshot, roomType } of results) {
+      if (!days[idx]) continue;
+      const day = { ...days[idx], hotel: snapshot, roomType };
+      day.dayCost = recomputeDayCost(day);
+      days[idx] = day;
+    }
+    return days;
+  };
+
+  // Surface the first pricing error + up to two distinct warnings across a
+  // run (don't spam one toast per night).
+  const reportRun = (results, errPrefix = '') => {
+    const firstErr = results.find(r => r.error);
+    if (firstErr) {
+      toast.error(`${errPrefix}${humanizeRateError(firstErr.error)}`, { duration: 6000 });
+    }
+    [...new Set(results.flatMap(r => r.warnings || []))]
+      .slice(0, 2)
+      .forEach(w => toast(w, { icon: '⚠️', duration: 6000 }));
+    return !firstErr;
+  };
+
+  // Pick a hotel for a day. Reflects the pick in a working copy so the
+  // consecutive same-hotel run is detected from the post-pick state, then
+  // reprices the WHOLE run with the true stay length — picking the same
+  // hotel that an adjacent day already has correctly grows the stay and
+  // re-applies its length-of-stay tier to every night.
+  const selectHotelForDay = async (dayIndex, hotel, opts = {}) => {
+    const baseDays = (quote.days || []).map((d, i) =>
+      i === dayIndex
+        ? { ...d, hotel: { hotelId: hotel._id, name: hotel.name } }
+        : d
+    );
+    const { range, results } = await priceRun(baseDays, dayIndex, hotel, opts);
+    if (!range) return;
+    reportRun(results);
+    setQuote(prev => {
+      const days = [...prev.days];
+      applyPricedRun(days, results);
+      return { ...prev, days };
+    });
+  };
+
+  // Extend an existing hotel stay by inserting another night after `dayIndex`
+  // and re-pricing the ENTIRE run (not just the new night) so the longer
+  // stay's LoS tier applies to every night. Composes the insert + the priced
+  // snapshots into one setQuote to dodge the closure-staleness race.
   const extendStayFromDay = async (dayIndex) => {
     const sourceDay = quote.days[dayIndex];
     if (!sourceDay?.hotel?.hotelId) return;
@@ -670,18 +986,7 @@ export default function QuoteBuilderPage() {
     }
 
     const newDayIndex = dayIndex + 1;
-    const checkIn = quote.startDate ? new Date(quote.startDate) : new Date();
-    checkIn.setDate(checkIn.getDate() + newDayIndex);
-
-    const result = await priceHotelForCheckIn(sourceHotel, checkIn, {
-      preferredRoomType: sourceDay.hotel.roomType,
-      preferredMealPlan: sourceDay.hotel.mealPlan,
-    });
-    if (result.error) toast.error(`Could not re-price for new night — ${humanizeRateError(result.error)}`, { duration: 6000 });
-    result.warnings.slice(0, 2).forEach(w => toast(w, { icon: '⚠️', duration: 6000 }));
-
-    const days = [...quote.days];
-    const newDay = {
+    const inserted = {
       dayNumber: newDayIndex + 1,
       title: '',
       location: sourceDay.location || '',
@@ -693,19 +998,56 @@ export default function QuoteBuilderPage() {
         dinner: !!sourceDay.meals?.dinner,
         notes: '',
       },
-      hotel: result.snapshot,
-      roomType: result.roomType,
+      // Thin pick so the run now includes this day; priceRun fills it in.
+      hotel: { hotelId: sourceHotel._id, name: sourceHotel.name },
+      roomType: '',
       activities: [],
       transport: null,
       images: [],
-      dayCost: result.snapshot.ratePerNightInQuoteCurrency || result.snapshot.ratePerNight || 0,
+      dayCost: 0,
     };
-    days.splice(newDayIndex, 0, newDay);
+    const baseDays = [...quote.days];
+    baseDays.splice(newDayIndex, 0, inserted);
+
+    const { range, results } = await priceRun(baseDays, newDayIndex, sourceHotel, {
+      preferredRoomType: sourceDay.hotel.roomType,
+      preferredMealPlan: sourceDay.hotel.mealPlan,
+    });
+    const ok = reportRun(results, 'Could not re-price for new night — ');
+
+    const days = applyPricedRun([...baseDays], results);
     days.forEach((d, i) => d.dayNumber = i + 1);
     setQuote({ ...quote, days });
     setExpandedDay(newDayIndex);
-    if (!result.error) toast.success('Added another night at the same hotel');
+    if (ok) toast.success(`Added a night — re-priced ${range?.length || 1}-night stay`);
   };
+
+  // Re-price a hotel stay with overridden preferences (#2.1 room type /
+  // #3.12 meal plan). A stay is one booking, so the WHOLE consecutive
+  // same-hotel run is re-priced; whichever preference isn't being changed
+  // is carried over from the current snapshot. Reuses the #1.1 run path
+  // so stay length / LoS tiers stay correct.
+  const repriceStayWith = async (dayIndex, override = {}) => {
+    const day = quote.days?.[dayIndex];
+    const hotelDoc = hotels.find(h => h._id === day?.hotel?.hotelId);
+    if (!hotelDoc) {
+      toast.error('Hotel is no longer in your partners list — re-pick it.');
+      return;
+    }
+    const { range, results } = await priceRun(quote.days, dayIndex, hotelDoc, {
+      preferredRoomType: override.preferredRoomType ?? day.hotel.roomType,
+      preferredMealPlan: override.preferredMealPlan ?? day.hotel.mealPlan,
+    });
+    if (!range) return;
+    reportRun(results);
+    setQuote(prev => {
+      const days = [...prev.days];
+      applyPricedRun(days, results);
+      return { ...prev, days };
+    });
+  };
+  const setRoomTypeForStay = (dayIndex, roomType) => repriceStayWith(dayIndex, { preferredRoomType: roomType });
+  const setMealPlanForStay = (dayIndex, mealPlan) => repriceStayWith(dayIndex, { preferredMealPlan: mealPlan });
 
   // Add an activity to a day. Server prices in the activity's source currency
   // and converts to quote currency using org FX overrides — we snapshot both
@@ -908,11 +1250,25 @@ export default function QuoteBuilderPage() {
 
         if (day.hotel?.hotelId) {
           const hotel = hotels.find(h => h._id === day.hotel.hotelId);
-          if (hotel) {
-            await selectHotelForDay(i, hotel, { preferredRoomType: day.hotel.roomType, preferredMealPlan: day.hotel.mealPlan });
-            priced++;
-          } else {
+          if (!hotel) {
             missing++;
+          } else {
+            // Reprice each consecutive same-hotel run exactly once, at its
+            // first day, with the true stay length. Later days of the run
+            // are handled by that single priceRun call, so skip them here.
+            const range = stayRangeAt(days, i);
+            if (range && range.start === i) {
+              const { results } = await priceRun(days, i, hotel, {
+                preferredRoomType: day.hotel.roomType,
+                preferredMealPlan: day.hotel.mealPlan,
+              });
+              setQuote(prev => {
+                const d = [...prev.days];
+                applyPricedRun(d, results);
+                return { ...prev, days: d };
+              });
+              priced += results.length;
+            }
           }
         }
 
@@ -989,6 +1345,9 @@ export default function QuoteBuilderPage() {
         toast.success('Quote created');
         navigate(`/quotes/${data._id}`);
       }
+      // Saved state is now the clean baseline — clear the dirty flag so
+      // navigating away no longer prompts.
+      savedRef.current = JSON.stringify(quoteRef.current);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Save failed');
     } finally {
@@ -996,23 +1355,64 @@ export default function QuoteBuilderPage() {
     }
   };
 
-  // Get relevant hotels for a destination
-  const getHotelsForDestination = (dest) => {
-    if (!dest) return [];
-    return hotels.filter(h => h.destination.toLowerCase().includes(dest.toLowerCase()));
-  };
-
-  // Get relevant activities for a destination
-  const getActivitiesForDestination = (dest) => {
-    if (!dest) return [];
-    return activities.filter(a => a.destination.toLowerCase().includes(dest.toLowerCase()));
-  };
+  // Skeleton that mirrors the builder layout while an existing quote
+  // loads — steadier than a bare spinner and prevents the empty-form flash.
+  if (loading) {
+    return (
+      <div className="space-y-6 animate-fade-in" aria-busy="true">
+        <div className="flex items-center justify-between">
+          <div className="h-5 w-20 rounded bg-muted animate-pulse" />
+          <div className="flex gap-2">
+            <div className="h-9 w-24 rounded-lg bg-muted animate-pulse" />
+            <div className="h-9 w-28 rounded-lg bg-muted animate-pulse" />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+          <div className="xl:col-span-3 space-y-4">
+            <div className="bg-card rounded-xl border border-border p-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="space-y-2">
+                    <div className="h-3 w-20 rounded bg-muted animate-pulse" />
+                    <div className="h-9 w-full rounded-lg bg-muted animate-pulse" />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="bg-card rounded-xl border border-border p-5 h-32 animate-pulse" />
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="bg-card rounded-xl border border-border p-5 h-20 animate-pulse" />
+            ))}
+          </div>
+          <div className="space-y-4">
+            <div className="bg-card rounded-xl border border-border p-5 h-64 animate-pulse" />
+            <div className="bg-card rounded-xl border border-border p-5 h-28 animate-pulse" />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in pb-24 xl:pb-0">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
-        <button onClick={() => navigate('/quotes')} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors self-start sm:self-auto">
+        <button
+          onClick={() => {
+            if (isDirty()) {
+              setConfirmDialog({
+                title: 'Discard unsaved changes?',
+                message: 'You have edits that haven\'t been saved. Leaving now will discard them.',
+                confirmLabel: 'Discard & leave',
+                tone: 'danger',
+                onConfirm: () => { setConfirmDialog(null); navigate('/quotes'); },
+              });
+              return;
+            }
+            navigate('/quotes');
+          }}
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors self-start sm:self-auto"
+        >
           <ArrowLeft className="w-4 h-4" /> Quotes
         </button>
         <div className="flex items-center flex-wrap gap-2">
@@ -1024,10 +1424,10 @@ export default function QuoteBuilderPage() {
                   navigator.clipboard.writeText(url);
                   toast.success('Share link copied!');
                 }}
-                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm font-medium text-muted-foreground hover:border-border transition-colors"
+                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:border-muted-foreground/40 transition-colors"
                 title="Copy share link"
               >
-                <Eye className="w-4 h-4" /> Share Link
+                <Link2 className="w-4 h-4" /> Share Link
               </button>
               <button
                 onClick={async () => {
@@ -1038,49 +1438,75 @@ export default function QuoteBuilderPage() {
                     toast.error('PDF download failed');
                   }
                 }}
-                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm font-medium text-muted-foreground hover:border-border transition-colors"
+                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:border-muted-foreground/40 transition-colors"
               >
                 <FileText className="w-4 h-4" /> PDF
               </button>
-              <button
-                onClick={async () => {
-                  const name = prompt('Template name:', quote.title);
-                  if (!name?.trim()) return;
-                  const description = prompt('Description (optional):', '') || '';
-                  try {
-                    await api.post(`/quotes/${id}/save-as-template`, { templateName: name, templateDescription: description });
-                    toast.success('Saved as template');
-                  } catch (err) { toast.error('Failed to save template'); }
-                }}
-                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm font-medium text-muted-foreground hover:border-border transition-colors"
-                title="Save as reusable template"
-              >
-                <Star className="w-4 h-4" /> Save as Template
-              </button>
-              <button
-                onClick={async () => {
-                  if (!confirm('Create a new version of this quote? The current version will be preserved.')) return;
-                  try {
-                    const { data } = await api.post(`/quotes/${id}/version`);
-                    toast.success(`Version ${data.version} created`);
-                    navigate(`/quotes/${data._id}`);
-                  } catch { toast.error('Version creation failed'); }
-                }}
-                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm font-medium text-muted-foreground hover:border-border transition-colors"
-                title="Create new version"
-              >
-                <Copy className="w-4 h-4" /> New Version
-              </button>
+
+              {/* Rare actions tucked behind an overflow menu so the action
+                  row reads as: secondary · secondary · ⋯ | Preview · Save · Send */}
+              <div className="relative">
+                <button
+                  onClick={() => setOverflowOpen(o => !o)}
+                  className="inline-flex items-center justify-center px-2.5 py-2 rounded-lg bg-card border border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground/40 transition-colors"
+                  title="More actions"
+                  aria-haspopup="menu"
+                  aria-expanded={overflowOpen}
+                >
+                  <MoreHorizontal className="w-4 h-4" />
+                </button>
+                {overflowOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setOverflowOpen(false)} />
+                    <div className="absolute right-0 mt-1 w-52 z-50 rounded-lg border border-border bg-card shadow-xl py-1" role="menu">
+                      <button
+                        role="menuitem"
+                        onClick={() => { setOverflowOpen(false); setTemplateModal(true); }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                      >
+                        <Star className="w-4 h-4 text-muted-foreground" /> Save as Template
+                      </button>
+                      <button
+                        role="menuitem"
+                        onClick={() => {
+                          setOverflowOpen(false);
+                          setConfirmDialog({
+                            title: 'Create a new version?',
+                            message: 'The current version will be preserved and a new editable copy will open.',
+                            confirmLabel: 'Create version',
+                            onConfirm: async () => {
+                              try {
+                                const { data } = await api.post(`/quotes/${id}/version`);
+                                toast.success(`Version ${data.version} created`);
+                                setConfirmDialog(null);
+                                navigate(`/quotes/${data._id}`);
+                              } catch {
+                                setConfirmDialog(null);
+                                toast.error('Version creation failed');
+                              }
+                            },
+                          });
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                      >
+                        <Copy className="w-4 h-4 text-muted-foreground" /> New Version
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="w-px h-6 bg-border mx-0.5 hidden sm:block" />
             </>
           )}
           <button
             onClick={() => setShowPreview(!showPreview)}
-            className={`inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${showPreview ? 'bg-primary text-white border-primary hover:bg-primary' : 'bg-card border-border text-muted-foreground hover:border-border'}`}
+            className={`inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${showPreview ? 'bg-primary text-white border-primary hover:bg-primary/90' : 'bg-card border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'}`}
             title="Toggle live preview"
           >
             <Eye className="w-4 h-4" /> {showPreview ? 'Hide Preview' : 'Preview'}
           </button>
-          <button onClick={() => handleSave('draft')} disabled={saving} className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-card border border-border text-sm font-medium text-foreground hover:border-border transition-colors disabled:opacity-50">
+          <button onClick={() => handleSave('draft')} disabled={saving} className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-card border border-border text-sm font-medium text-foreground hover:border-muted-foreground/40 transition-colors disabled:opacity-50">
             <Save className="w-4 h-4" /> Save Draft
           </button>
           <button
@@ -1089,10 +1515,10 @@ export default function QuoteBuilderPage() {
             title={unacknowledgedBlockers.length > 0
               ? `${unacknowledgedBlockers.length} blocking condition${unacknowledgedBlockers.length === 1 ? '' : 's'} must be acknowledged before sending`
               : ''}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold shadow-sm hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Send className="w-4 h-4" />
-            Save & Send
+            Save &amp; Send
             {unacknowledgedBlockers.length > 0 && (
               <span className="ml-1 inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-700 text-white">
                 {unacknowledgedBlockers.length}
@@ -1108,7 +1534,11 @@ export default function QuoteBuilderPage() {
             <div className="sticky top-0 z-10 bg-primary/10 border-b border-amber-100 px-3 py-1.5 text-[10px] font-semibold text-primary uppercase tracking-wide flex items-center gap-1.5">
               <Eye className="w-3 h-3" /> Live Preview
             </div>
-            <div className="origin-top scale-[0.75] -mt-12">
+            {/* `zoom` scales the layout box (unlike `transform: scale`,
+                which leaves the original-size box behind and forced the
+                old `-mt-12` crop hack). No offset compensation needed —
+                the Live Preview bar above is a normal sticky sibling. */}
+            <div style={{ zoom: 0.75 }}>
               <QuoteRenderer quote={quote} previewMode={true} />
             </div>
           </div>
@@ -1116,15 +1546,17 @@ export default function QuoteBuilderPage() {
         <div className={showPreview ? 'lg:order-1 space-y-4' : 'xl:col-span-3 space-y-4'}>
           {/* Trip Info */}
           <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Trip Title</label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  Trip Title <span className="text-destructive">*</span>
+                </label>
                 <input
                   type="text"
                   value={quote.title}
                   onChange={(e) => setQuote({ ...quote, title: e.target.value })}
                   placeholder="e.g. 13-Day Kenya Safari & Beach Holiday"
-                  className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
+                  className="w-full px-3 py-2.5 rounded-lg bg-background border border-border text-base font-medium text-foreground focus:outline-none focus:border-primary transition-colors"
                 />
               </div>
               <div>
@@ -1208,8 +1640,13 @@ export default function QuoteBuilderPage() {
                   </>
                 )}
               </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Start Date</label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  Start Date <span className="text-destructive">*</span>
+                </label>
                 <input
                   type="date"
                   value={quote.startDate}
@@ -1218,68 +1655,18 @@ export default function QuoteBuilderPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Travelers</label>
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    min={1}
-                    value={quote.travelers.adults}
-                    onChange={(e) => setQuote({ ...quote, travelers: { ...quote.travelers, adults: parseInt(e.target.value) || 1 } })}
-                    className="w-20 px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
-                    placeholder="Adults"
-                  />
-                  <input
-                    type="number"
-                    min={0}
-                    value={quote.travelers.children}
-                    onChange={(e) => {
-                      const n = Math.max(0, parseInt(e.target.value) || 0);
-                      // Keep childAges length in sync — preserve already-entered ages,
-                      // pad with the default-8 used elsewhere (matches the search
-                      // executor's DEFAULT_CHILD_AGE convention).
-                      const existing = quote.travelers.childAges || [];
-                      const ages = existing.slice(0, n);
-                      while (ages.length < n) ages.push(8);
-                      setQuote({ ...quote, travelers: { ...quote.travelers, children: n, childAges: ages } });
-                    }}
-                    className="w-20 px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
-                    placeholder="Kids"
-                  />
-                </div>
-                {quote.travelers.children > 0 && (
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    <span className="text-[11px] text-muted-foreground">Ages:</span>
-                    {Array.from({ length: quote.travelers.children }).map((_, i) => (
-                      <input
-                        key={i}
-                        type="number"
-                        min={0}
-                        max={17}
-                        value={quote.travelers.childAges?.[i] ?? 8}
-                        onChange={(e) => {
-                          const v = parseInt(e.target.value);
-                          const age = Number.isFinite(v) ? Math.min(17, Math.max(0, v)) : 8;
-                          const ages = [...(quote.travelers.childAges || [])];
-                          while (ages.length < quote.travelers.children) ages.push(8);
-                          ages[i] = age;
-                          setQuote({ ...quote, travelers: { ...quote.travelers, childAges: ages } });
-                        }}
-                        className="w-12 px-2 py-1 rounded-md bg-background border border-border text-xs text-foreground focus:outline-none focus:border-primary"
-                        title={`Age of child ${i + 1}`}
-                      />
-                    ))}
-                    <span className="text-[10px] text-muted-foreground/60 ml-1">
-                      Drives child rate brackets and park-fee tiers.
-                    </span>
-                  </div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">End Date</label>
+                <input
+                  type="date"
+                  value={quote.endDate || ''}
+                  min={quote.startDate || undefined}
+                  onChange={(e) => setQuote({ ...quote, endDate: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
+                />
+                {quote.startDate && quote.endDate && quote.endDate < quote.startDate && (
+                  <p className="text-[10px] text-amber-600 mt-1">End date is before the start date.</p>
                 )}
               </div>
-            </div>
-          </div>
-
-          {/* Cover Narrative + Tour Type */}
-          <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">Tour Type</label>
                 <select
@@ -1293,15 +1680,141 @@ export default function QuoteBuilderPage() {
                   <option value="custom">Custom</option>
                 </select>
               </div>
+            </div>
+          </div>
+
+          {/* Travelers & Rooms — party composition + explicit room split.
+              Its own card now: a distinct concern from the identity fields,
+              and previously crammed into one cell of the Trip Info grid. */}
+          <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
+            <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-1.5">
+              <UsersIcon className="w-4 h-4" /> Travelers &amp; Rooms
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">End Date</label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Adults</label>
                 <input
-                  type="date"
-                  value={quote.endDate || ''}
-                  onChange={(e) => setQuote({ ...quote, endDate: e.target.value })}
+                  type="number"
+                  min={1}
+                  value={quote.travelers.adults}
+                  onChange={(e) => setQuote({ ...quote, travelers: { ...quote.travelers, adults: parseInt(e.target.value) || 1 } })}
                   className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
                 />
               </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Children</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={quote.travelers.children}
+                  onChange={(e) => {
+                    const n = Math.max(0, parseInt(e.target.value) || 0);
+                    // Keep childAges length in sync — preserve already-entered ages,
+                    // pad with the default-8 used elsewhere (matches the search
+                    // executor's DEFAULT_CHILD_AGE convention).
+                    const existing = quote.travelers.childAges || [];
+                    const ages = existing.slice(0, n);
+                    while (ages.length < n) ages.push(8);
+                    setQuote({ ...quote, travelers: { ...quote.travelers, children: n, childAges: ages } });
+                  }}
+                  className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
+                />
+              </div>
+              {/* Explicit room split (#2.2). Blank → resolver infers
+                  (pair adults into doubles, lone adult single, kids
+                  shared). Set any field → that split is authoritative
+                  for every hotel. Changing this marks priced hotels
+                  stale via the "Reprice all" banner. */}
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  Rooms <span className="text-muted-foreground/60">(optional — auto if blank)</span>
+                </label>
+                <div className="flex flex-wrap gap-3">
+                  {[
+                    { key: 'singles', label: 'Sgl' },
+                    { key: 'doubles', label: 'Dbl' },
+                    { key: 'triples', label: 'Tpl' },
+                    { key: 'quads', label: 'Quad' },
+                  ].map(({ key, label }) => (
+                    <div key={key} className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-muted-foreground/70 w-7 text-right">{label}</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={quote.travelers.rooms?.[key] ?? 0}
+                        onChange={(e) => {
+                          const v = Math.max(0, parseInt(e.target.value) || 0);
+                          setQuote({
+                            ...quote,
+                            travelers: {
+                              ...quote.travelers,
+                              rooms: { ...(quote.travelers.rooms || {}), [key]: v },
+                            },
+                          });
+                        }}
+                        className="w-14 px-2 py-1.5 rounded-md bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary"
+                        title={`Number of ${key}`}
+                      />
+                    </div>
+                  ))}
+                </div>
+                {(() => {
+                  const r = quote.travelers.rooms || {};
+                  const cap = (Number(r.singles) || 0) * 1 + (Number(r.doubles) || 0) * 2
+                    + (Number(r.triples) || 0) * 3 + (Number(r.quads) || 0) * 4;
+                  const party = (Number(quote.travelers.adults) || 0) + (Number(quote.travelers.children) || 0);
+                  if (cap === 0) {
+                    return (
+                      <p className="text-[11px] text-muted-foreground/60 mt-1.5">
+                        Auto — rooms inferred from party size.
+                      </p>
+                    );
+                  }
+                  const ok = cap === party;
+                  return (
+                    <p className={`text-[11px] mt-1.5 ${ok ? 'text-muted-foreground/60' : 'text-amber-600'}`}>
+                      {ok ? '✓' : '⚠'} Configured for {cap} guest{cap === 1 ? '' : 's'} · party is {party}
+                      {!ok && ' — check the split'}
+                    </p>
+                  );
+                })()}
+              </div>
+            </div>
+            {quote.travelers.children > 0 && (
+              <div className="mt-4 flex flex-wrap items-center gap-1.5">
+                <span className="text-xs font-medium text-muted-foreground">Child ages:</span>
+                {Array.from({ length: quote.travelers.children }).map((_, i) => (
+                  <input
+                    key={i}
+                    type="number"
+                    min={0}
+                    max={17}
+                    value={quote.travelers.childAges?.[i] ?? 8}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value);
+                      const age = Number.isFinite(v) ? Math.min(17, Math.max(0, v)) : 8;
+                      const ages = [...(quote.travelers.childAges || [])];
+                      while (ages.length < quote.travelers.children) ages.push(8);
+                      ages[i] = age;
+                      setQuote({ ...quote, travelers: { ...quote.travelers, childAges: ages } });
+                    }}
+                    className="w-12 px-2 py-1 rounded-md bg-background border border-border text-xs text-foreground focus:outline-none focus:border-primary"
+                    title={`Age of child ${i + 1}`}
+                  />
+                ))}
+                <span className="text-[11px] text-muted-foreground/60 ml-1">
+                  Drives child rate brackets and park-fee tiers.
+                </span>
+                <p className="w-full text-[11px] text-amber-600 mt-1">
+                  ⚠ Ages default to 8 — set each child's real age, it changes the price (0–3 often free, 4–11 discounted).
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Pricing basis & cover */}
+          <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">Currency</label>
                 <select
@@ -1323,10 +1836,10 @@ export default function QuoteBuilderPage() {
                   <option value="KES">KES (KSh)</option>
                   <option value="TZS">TZS</option>
                   <option value="UGX">UGX</option>
+                  <option value="RWF">RWF</option>
+                  <option value="ZAR">ZAR (R)</option>
                 </select>
               </div>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">Client Type</label>
                 <select
@@ -1467,6 +1980,7 @@ export default function QuoteBuilderPage() {
                 key={day._id || idx}
                 day={day}
                 index={idx}
+                dayPt={dayPassThroughFace(quote.days || [], idx)}
                 isExpanded={expandedDay === idx}
                 onToggle={() => setExpandedDay(expandedDay === idx ? -1 : idx)}
                 onUpdate={(updates) => updateDay(idx, updates)}
@@ -1485,6 +1999,8 @@ export default function QuoteBuilderPage() {
                 marginPercent={quote.pricing.marginPercent}
                 onSelectHotel={(hotel) => selectHotelForDay(idx, hotel)}
                 onExtendStay={() => extendStayFromDay(idx)}
+                onChangeRoomType={(rt) => setRoomTypeForStay(idx, rt)}
+                onChangeMealPlan={(mp) => setMealPlanForStay(idx, mp)}
                 onAddActivity={(activity) => addActivityToDay(idx, activity)}
                 onRemoveActivity={(actIdx) => removeActivityFromDay(idx, actIdx)}
                 onSelectTransport={(t, opts) => setTransportForDay(idx, t, opts)}
@@ -1601,14 +2117,28 @@ export default function QuoteBuilderPage() {
               </div>
 
               <div>
-                <div className="flex justify-between text-sm mb-1">
+                <div className="flex justify-between items-center text-sm mb-1">
                   <span className="text-muted-foreground">Margin</span>
-                  <span className="text-foreground font-medium">{quote.pricing.marginPercent}%</span>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={quote.pricing.marginPercent}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value);
+                        const m = Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 0;
+                        setQuote({ ...quote, pricing: { ...quote.pricing, marginPercent: m } });
+                      }}
+                      className="w-14 px-1.5 py-0.5 rounded-md bg-background border border-border text-sm text-right text-foreground focus:outline-none focus:border-primary"
+                    />
+                    <span className="text-muted-foreground font-medium">%</span>
+                  </div>
                 </div>
                 <input
                   type="range"
                   min={0}
-                  max={50}
+                  max={100}
                   value={quote.pricing.marginPercent}
                   onChange={(e) => setQuote({
                     ...quote,
@@ -1619,7 +2149,7 @@ export default function QuoteBuilderPage() {
                 <div className="flex justify-between text-xs text-muted-foreground/70 mt-0.5">
                   <span>0%</span>
                   <span className="text-primary font-medium">+{formatCurrency(quote.pricing.marginAmount, quote.pricing.currency)}</span>
-                  <span>50%</span>
+                  <span>100%</span>
                 </div>
               </div>
 
@@ -1679,6 +2209,42 @@ export default function QuoteBuilderPage() {
                   segments={quote.days || []}
                   marginPercent={quote.pricing.marginPercent}
                   currency={quote.pricing.currency}
+                  quoteTotal={quote.pricing.totalPrice}
+                  markupFees={quote.pricing.markupPassThroughFees !== false}
+                  // Auto-generate: replace only the previously auto-generated
+                  // rows, then flag every day as itemized. Manual extras
+                  // (insurance, tips) and package totals are preserved so
+                  // re-clicking Auto-generate doesn't wipe them. Days are
+                  // flagged in the same setQuote as the items write so the
+                  // pricing useEffect always sees a consistent state.
+                  onAutoGenerate={(newAutoItems) => setQuote(prev => ({
+                    ...prev,
+                    days: (prev.days || []).map(d => (
+                      d.isItemized ? d : { ...d, isItemized: true }
+                    )),
+                    pricing: {
+                      ...prev.pricing,
+                      lineItems: [
+                        ...(prev.pricing.lineItems || []).filter(li => li.source !== 'auto'),
+                        ...newAutoItems,
+                      ],
+                    },
+                  }))}
+                  // Reset: drop auto-generated rows, keep manual + package.
+                  // Clear isItemized only on days that aren't carrying a
+                  // package hotel — package days stay itemized because
+                  // their dayCost is 0 and the package line item is the
+                  // canonical source for their total.
+                  onResetToDayRollup={() => setQuote(prev => ({
+                    ...prev,
+                    days: (prev.days || []).map(d => (
+                      d.hotel?.isPackageNight ? d : (d.isItemized ? { ...d, isItemized: false } : d)
+                    )),
+                    pricing: {
+                      ...prev.pricing,
+                      lineItems: (prev.pricing.lineItems || []).filter(li => li.source !== 'auto'),
+                    },
+                  }))}
                 />
               )}
             </div>
@@ -1745,6 +2311,75 @@ export default function QuoteBuilderPage() {
         </div>
         )}
       </div>
+
+      {/* Mobile price bar — the pricing sidebar drops below the whole
+          itinerary on < xl and isn't sticky there, so the operator would
+          have to scroll past everything to see the total. This keeps the
+          client price and primary actions in reach. Sits above the app's
+          lg:hidden bottom nav (bottom-16) and clears it on lg–xl
+          (lg:bottom-0). Hidden at xl where the sidebar is sticky. */}
+      <div className="xl:hidden fixed inset-x-0 bottom-16 lg:bottom-0 z-20 border-t border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+        <div className="flex items-center justify-between gap-3 px-4 py-2.5 pb-safe">
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground/70 leading-none">Client Price</p>
+            <p className="text-base font-bold text-primary leading-tight truncate">
+              {formatCurrency(quote.pricing.totalPrice, quote.pricing.currency)}
+              {quote.travelers.adults + quote.travelers.children > 0 && (
+                <span className="ml-1.5 text-[11px] font-normal text-muted-foreground/70">
+                  · {formatCurrency(quote.pricing.perPersonPrice, quote.pricing.currency)} pp
+                </span>
+              )}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={() => handleSave('draft')}
+              disabled={saving}
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-card border border-border text-sm font-medium text-foreground disabled:opacity-50"
+              title="Save draft"
+            >
+              <Save className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => handleSave('sent')}
+              disabled={saving || unacknowledgedBlockers.length > 0}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Send className="w-4 h-4" />
+              Send
+              {unacknowledgedBlockers.length > 0 && (
+                <span className="inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-700 text-white">
+                  {unacknowledgedBlockers.length}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <ConfirmModal
+        open={!!confirmDialog}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        tone={confirmDialog?.tone}
+        onConfirm={confirmDialog?.onConfirm}
+        onCancel={() => setConfirmDialog(null)}
+      />
+      <TemplateModal
+        open={!!templateModal}
+        defaultName={quote.title}
+        onCancel={() => setTemplateModal(null)}
+        onSubmit={async ({ name, description }) => {
+          try {
+            await api.post(`/quotes/${id}/save-as-template`, { templateName: name, templateDescription: description });
+            toast.success('Saved as template');
+            setTemplateModal(null);
+          } catch {
+            toast.error('Failed to save template');
+          }
+        }}
+      />
     </div>
   );
 }
@@ -1766,6 +2401,7 @@ function AIPanel({ quote, setQuote, destinations }) {
   const [generatingNarratives, setGeneratingNarratives] = useState(false);
   const [suggestingRoute, setSuggestingRoute] = useState(false);
   const [routeResult, setRouteResult] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
   // Calculate trip length from dates or segments
   const calcTripLength = () => {
@@ -1877,10 +2513,22 @@ function AIPanel({ quote, setQuote, destinations }) {
   const [draftBudget, setDraftBudget] = useState('mid-range');
   const [drafting, setDrafting] = useState(false);
 
-  const draftFromPrompt = async () => {
+  const draftFromPrompt = () => {
     if (!draftPrompt.trim()) { toast.error('Describe the trip first'); return; }
-    if (quote.days?.length > 0 && !confirm('This will replace your current itinerary. Continue?')) return;
+    if (quote.days?.length > 0) {
+      setConfirmDialog({
+        title: 'Replace itinerary?',
+        message: 'Drafting from this prompt will replace your current itinerary. This can\'t be undone.',
+        confirmLabel: 'Replace',
+        tone: 'danger',
+        onConfirm: () => { setConfirmDialog(null); doDraftFromPrompt(); },
+      });
+      return;
+    }
+    doDraftFromPrompt();
+  };
 
+  const doDraftFromPrompt = async () => {
     setDrafting(true);
     try {
       const { data } = await api.post('/ai/draft-itinerary', {
@@ -2065,6 +2713,16 @@ function AIPanel({ quote, setQuote, destinations }) {
           </div>
         )}
       </div>
+
+      <ConfirmModal
+        open={!!confirmDialog}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        tone={confirmDialog?.tone}
+        onConfirm={confirmDialog?.onConfirm}
+        onCancel={() => setConfirmDialog(null)}
+      />
     </div>
   );
 }
@@ -2329,14 +2987,32 @@ function aggregateDaysIntoSegments(days) {
   return segments;
 }
 
-function LineItemsEditor({ lineItems, onChange, segments, marginPercent, currency }) {
+function LineItemsEditor({ lineItems, onChange, segments, marginPercent, currency, onAutoGenerate, onResetToDayRollup, quoteTotal = 0, markupFees = true }) {
   const [editIdx, setEditIdx] = useState(null);
   const [collapsed, setCollapsed] = useState(lineItems.length > 0);
 
   // `segments` here is actually `quote.days` (one entry per night). Aggregate
   // them first so a 5-night Mara stay generates ONE line item with quantity 5
-  // instead of five single-night items. Pass-through fees scale by nights too,
-  // since the snapshot stores one night's worth (price-stay is called per day).
+  // instead of five single-night items.
+  //
+  // Items are stored at CLIENT-FACING (post-markup) prices — matches the
+  // schema doc, the renderer, the PDF template, and invoiceBuilder, which
+  // all assume the values they display are already marked up. The pricing
+  // useEffect sums these into totalPrice directly, with no further markup.
+  //
+  // Auto-generate ALSO marks each day as `isItemized: true` (via
+  // onAutoGenerate) so the day-cost rollup skips those days. Without
+  // this guard the same costs would be counted twice — once via dayCost
+  // * margin and once via the line items.
+  //
+  // Pass-through fees are intentionally excluded — the renderer already
+  // surfaces them as a separate "Park & Government Fees" section, and the
+  // pricing useEffect's PT branch applies them to the total. Including
+  // them as line items would double-count.
+  //
+  // Margin caveat: line items are frozen at the markup in effect when
+  // generated. Sliding the margin afterwards does not retroactively
+  // update them — operators see a banner urging Re-generate.
   const autoGenerate = () => {
     const items = [];
     const markup = 1 + (marginPercent / 100);
@@ -2351,20 +3027,8 @@ function LineItemsEditor({ lineItems, onChange, segments, marginPercent, currenc
           quantity: seg.nights,
           unitPrice: Math.round(nightly * markup),
           total: Math.round(nightly * seg.nights * markup),
+          source: 'auto',
         });
-      }
-      // Pass-through fees — snapshot is per-night, scale by stay length.
-      // No markup (pass-through), no roll-up across hotels (fees can differ).
-      for (const fee of (seg.hotel?.passThroughFees || [])) {
-        const perNight = fee.amountInQuoteCurrency || 0;
-        if (perNight > 0 && fee.mandatory !== false && seg.nights > 0) {
-          items.push({
-            description: `${fee.name}${seg.destination ? ' — ' + seg.destination : ''}`,
-            quantity: seg.nights,
-            unitPrice: Math.round(perNight),
-            total: Math.round(perNight * seg.nights),
-          });
-        }
       }
 
       // Activities — one line per activity instance (per day they're added).
@@ -2377,6 +3041,7 @@ function LineItemsEditor({ lineItems, onChange, segments, marginPercent, currenc
             quantity: 1,
             unitPrice: Math.round(cost * markup),
             total: Math.round(cost * markup),
+            source: 'auto',
           });
         }
       }
@@ -2392,17 +3057,25 @@ function LineItemsEditor({ lineItems, onChange, segments, marginPercent, currenc
             quantity: 1,
             unitPrice: Math.round(cost * markup),
             total: Math.round(cost * markup),
+            source: 'auto',
           });
         }
       }
     }
 
-    onChange(items);
-    toast.success(`Generated ${items.length} line items`);
+    // Hand off to parent — parent writes lineItems AND flips isItemized
+    // on every day in a single setQuote call to avoid a transient state
+    // where line items exist but flags haven't been set yet.
+    if (onAutoGenerate) {
+      onAutoGenerate(items);
+    } else {
+      onChange(items);
+    }
+    toast.success(`Generated ${items.length} line item${items.length === 1 ? '' : 's'} from your days`);
   };
 
   const addItem = () => {
-    onChange([...lineItems, { description: '', quantity: 1, unitPrice: 0, total: 0 }]);
+    onChange([...lineItems, { description: '', quantity: 1, unitPrice: 0, total: 0, source: 'manual' }]);
     setEditIdx(lineItems.length);
     setCollapsed(false);
   };
@@ -2423,32 +3096,86 @@ function LineItemsEditor({ lineItems, onChange, segments, marginPercent, currenc
   };
 
   const itemsTotal = lineItems.reduce((s, li) => s + (li.total || 0), 0);
+  // True when any day has been flagged as itemized (auto-generate or
+  // applyPackage). Drives the "Reset to day rollup" affordance.
+  const anyItemized = (segments || []).some(d => d.isItemized);
+  // True only when there's actually something for Re-generate to refresh
+  // — i.e., previously-auto-generated rows. Package-only quotes have
+  // isItemized days but no auto rows; the banner shouldn't nag them.
+  const hasAutoItems = lineItems.some(li => li.source === 'auto');
+
+  // ── Reconciliation (#3.9) ────────────────────────────────────────────
+  // In line_items mode the client sees the line-item TABLE and the Total.
+  // The table sums to `itemsTotal`; the Total also includes the day-cost
+  // rollup for any NON-itemised days and the marked-up pass-through fees.
+  // Pass-through fees are explained to the client separately ("Included in
+  // total", #1.5), so the only genuinely unexplained gap is the cost of
+  // days the operator built but did not itemise. Compute it with the SAME
+  // per-day PT + margin logic as the pricing useEffect so there are no
+  // false positives.
+  const ptInTotal = (segments || []).reduce((sum, d, i) => {
+    const m = d.marginOverride != null ? d.marginOverride : marginPercent;
+    const pt = dayPassThroughFace(segments || [], i);
+    return sum + (markupFees ? pt * (1 + m / 100) : pt);
+  }, 0);
+  // totalPrice = Σ nonItemised(dayCost×m) + ptInTotal + itemsTotal, so this
+  // residual is exactly the marked-up cost of non-itemised days — what the
+  // client's breakdown would be missing.
+  const reconGap = Math.round((Number(quoteTotal) || 0) - itemsTotal - ptInTotal);
+  const unitemizedDays = (segments || []).filter(d => !d.isItemized && (d.dayCost || 0) > 0).length;
+  const showReconWarning = lineItems.length > 0 && reconGap > 1 && unitemizedDays > 0;
 
   return (
     <div className="border-t border-border pt-3 mt-1">
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2 gap-2">
         <button
           type="button"
           onClick={() => setCollapsed(c => !c)}
-          className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+          className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors min-w-0"
         >
           <ChevronDown className={`w-3.5 h-3.5 transition-transform ${collapsed ? '-rotate-90' : ''}`} />
           Line Items
           {lineItems.length > 0 && (
-            <span className="text-[10px] text-muted-foreground/70 font-normal">
+            <span className="text-[10px] text-muted-foreground/70 font-normal truncate">
               · {lineItems.length} item{lineItems.length !== 1 ? 's' : ''} · {formatCurrency(itemsTotal, currency)}
             </span>
           )}
         </button>
         {!collapsed && (
-          <button
-            onClick={autoGenerate}
-            className="text-[10px] text-primary hover:underline flex items-center gap-0.5"
-          >
-            <Sparkles className="w-3 h-3" /> Auto-generate
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={autoGenerate}
+              title="Build line items from your day picks. Days become itemized — their costs feed the total via these line items instead of the day rollup."
+              className="text-[10px] text-primary hover:underline flex items-center gap-0.5"
+            >
+              <Sparkles className="w-3 h-3" /> Auto-generate
+            </button>
+            {anyItemized && onResetToDayRollup && (
+              <button
+                onClick={onResetToDayRollup}
+                title="Clear line items and resume using day-by-day cost rollup."
+                className="text-[10px] text-muted-foreground hover:text-foreground hover:underline"
+              >
+                Reset to day rollup
+              </button>
+            )}
+          </div>
         )}
       </div>
+
+      {!collapsed && hasAutoItems && (
+        <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mb-2 leading-snug">
+          Total is driven by line items. Change day picks or margin?{' '}
+          <button
+            type="button"
+            onClick={autoGenerate}
+            className="font-semibold underline hover:text-amber-900"
+          >
+            Re-generate
+          </button>{' '}
+          to refresh.
+        </p>
+      )}
 
       {!collapsed && lineItems.length > 0 && (
         <div className="space-y-1 mb-2 max-h-48 overflow-y-auto">
@@ -2476,13 +3203,17 @@ function LineItemsEditor({ lineItems, onChange, segments, marginPercent, currenc
                       type="number"
                       value={item.unitPrice}
                       onChange={(e) => updateItem(i, 'unitPrice', parseFloat(e.target.value) || 0)}
-                      className="w-20 px-1.5 py-1 rounded border border-border text-[11px] bg-card focus:outline-none focus:border-primary"
-                      placeholder="Price"
+                      className="w-24 px-1.5 py-1 rounded border border-border text-[11px] bg-card focus:outline-none focus:border-primary"
+                      placeholder="Client price"
+                      title="Client-facing price per unit — margin is NOT applied to line items, enter the amount the client should see"
                     />
                     <span className="text-[10px] text-muted-foreground/70">=</span>
                     <span className="text-[11px] font-semibold text-foreground">{formatCurrency(item.total, currency)}</span>
                     <button onClick={() => setEditIdx(null)} className="ml-auto text-[10px] text-primary">Done</button>
                   </div>
+                  <p className="text-[9px] text-muted-foreground/70 leading-snug">
+                    Enter the <strong>client-facing price</strong> — margin is <strong>not</strong> re-applied to line items. (Auto-generated and package rows already include your margin.)
+                  </p>
                 </div>
               ) : (
                 <div
@@ -2513,11 +3244,44 @@ function LineItemsEditor({ lineItems, onChange, segments, marginPercent, currenc
       )}
 
       {!collapsed && lineItems.length > 0 && (
-        <div className="flex justify-between mt-2 pt-2 border-t border-border">
-          <span className="text-xs text-muted-foreground">Line items total</span>
-          <span className="text-xs font-bold text-foreground">
-            {formatCurrency(itemsTotal, currency)}
-          </span>
+        <div className="mt-2 pt-2 border-t border-border space-y-1">
+          <div className="flex justify-between">
+            <span className="text-xs text-muted-foreground">Line items total</span>
+            <span className="text-xs font-bold text-foreground">
+              {formatCurrency(itemsTotal, currency)}
+            </span>
+          </div>
+          {/* Reconciliation against the quote total the client also sees.
+              Pass-through fees legitimately make the total exceed the table
+              (shown to the client as "Included in total"), so surface that
+              separately rather than as a discrepancy. */}
+          <div className="flex justify-between">
+            <span className="text-[10px] text-muted-foreground/70">Quote total (client sees)</span>
+            <span className="text-[10px] text-muted-foreground/70">
+              {formatCurrency(Math.round(Number(quoteTotal) || 0), currency)}
+            </span>
+          </div>
+          {ptInTotal > 1 && !showReconWarning && (
+            <p className="text-[10px] text-muted-foreground/60 leading-snug">
+              Difference is {formatCurrency(Math.round(ptInTotal), currency)} park &amp; fees — shown to the client as “included in total”, not a discrepancy.
+            </p>
+          )}
+          {showReconWarning && (
+            <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 leading-snug">
+              <p className="font-semibold">⚠ Breakdown won’t add up for the client</p>
+              <p className="mt-0.5">
+                {formatCurrency(reconGap, currency)} from {unitemizedDays} day{unitemizedDays === 1 ? '' : 's'} isn’t in these line items, so the table won’t match the {formatCurrency(Math.round(Number(quoteTotal) || 0), currency)} total.{' '}
+                <button
+                  type="button"
+                  onClick={autoGenerate}
+                  className="font-semibold underline hover:text-amber-900"
+                >
+                  Re-generate
+                </button>{' '}
+                to itemise every day, or switch “Client sees” to Total only.
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -2527,14 +3291,16 @@ function LineItemsEditor({ lineItems, onChange, segments, marginPercent, currenc
 // ─── Day Card Component ──────────────────────────
 
 function DayCard({
-  day, index, isExpanded, onToggle, onUpdate, onRemove, onMoveUp, onMoveDown,
+  day, index, dayPt = 0, isExpanded, onToggle, onUpdate, onRemove, onMoveUp, onMoveDown,
   onDuplicate, onAddAfter, isFirst, isLast,
   hotels, activities, transport, destinations, currency, marginPercent,
-  onSelectHotel, onExtendStay, onAddActivity, onRemoveActivity,
+  onSelectHotel, onExtendStay, onChangeRoomType, onChangeMealPlan, onAddActivity, onRemoveActivity,
   onSelectTransport, onClearTransport, onUpdateTransportField,
   onAddImage, onRemoveImage, onSetHero, onAcknowledgeCondition,
 }) {
   const [showHotelPicker, setShowHotelPicker] = useState(false);
+  const [hotelQuery, setHotelQuery] = useState('');
+  const [hotelSort, setHotelSort] = useState('name'); // 'name' | 'price' | 'stars'
   const [showActivityPicker, setShowActivityPicker] = useState(false);
   const [showTransportPicker, setShowTransportPicker] = useState(false);
   // Per-km vehicles need a distance before they can be priced; this captures
@@ -2558,15 +3324,15 @@ function DayCard({
     }
   }, [isExpanded]);
 
-  const matchedHotels = hotels.filter(h => !day.location || h.destination?.toLowerCase().includes(day.location.toLowerCase()));
-  const matchedActivities = activities.filter(a => !day.location || a.destination?.toLowerCase().includes(day.location.toLowerCase()));
+  const matchedHotels = hotels.filter(h => !day.location || destMatch(h.destination, day.location));
+  const matchedActivities = activities.filter(a => !day.location || destMatch(a.destination, day.location));
   // Transport: filter by matching destination if any are tagged on the
   // partner doc, otherwise show all (vehicles are often used trip-wide).
   const matchedTransport = (transport || []).filter(t => {
     if (!day.location) return true;
     const dests = t.destinations || [];
     if (!dests.length) return true;
-    return dests.some(d => d.toLowerCase().includes(day.location.toLowerCase()) || day.location.toLowerCase().includes(d.toLowerCase()));
+    return dests.some(d => destMatch(d, day.location));
   });
 
   const heroImage = day.images?.[0];
@@ -2607,18 +3373,39 @@ function DayCard({
           <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
             <div className="text-left sm:text-right">
               <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wide flex items-center sm:justify-end gap-1">
-                Cost / Price
-                {day.marginOverride != null && (
+                {day.isItemized ? 'In Line Items' : 'Cost / Price'}
+                {!day.isItemized && day.marginOverride != null && (
                   <span className="text-[8px] bg-primary/15 text-primary px-1 rounded font-semibold">{day.marginOverride}%</span>
                 )}
               </div>
-              <div className="text-xs">
-                <span className="text-muted-foreground">{formatCurrency(day.dayCost, currency)}</span>
-                <span className="text-muted-foreground/40 mx-1">→</span>
-                <span className="text-foreground font-semibold">
-                  {formatCurrency(Math.round(day.dayCost * (1 + ((day.marginOverride != null ? day.marginOverride : marginPercent) || 0) / 100)), currency)}
-                </span>
-              </div>
+              {day.isItemized ? (
+                <div
+                  className="text-xs text-muted-foreground/70 italic"
+                  title="This day's costs feed the total via Line Items, not the day rollup."
+                >
+                  itemized
+                </div>
+              ) : (
+                <div className="text-xs">
+                  <span className="text-muted-foreground">{formatCurrency(day.dayCost, currency)}</span>
+                  <span className="text-muted-foreground/40 mx-1">→</span>
+                  <span className="text-foreground font-semibold">
+                    {formatCurrency(Math.round(day.dayCost * (1 + ((day.marginOverride != null ? day.marginOverride : marginPercent) || 0) / 100)), currency)}
+                  </span>
+                </div>
+              )}
+              {/* Mandatory park / conservancy / govt fees charged on this
+                  day (stay-aware: one-shot fees only on the stay's first
+                  night). Shown so the per-day chips reconcile with the
+                  sidebar total — they're in the trip total, not extra. */}
+              {dayPt > 0 && (
+                <div
+                  className="text-[10px] text-muted-foreground/70 sm:text-right"
+                  title="Mandatory park / conservancy / government fees for this day — already included in the trip total."
+                >
+                  + {formatCurrency(dayPt, currency)} park &amp; fees
+                </div>
+              )}
             </div>
             <div className="flex gap-0.5">
               <button onClick={(e) => { e.stopPropagation(); onMoveUp(); }} className="p-1 rounded hover:bg-muted text-muted-foreground/70 disabled:opacity-30" disabled={isFirst}>
@@ -2724,7 +3511,14 @@ function DayCard({
                   <div className="flex items-center gap-3 p-2.5 rounded-lg bg-background border border-border">
                     {day.hotel.images?.[0]?.url && <img src={day.hotel.images[0].url} alt="" className="w-12 h-12 rounded-md object-cover" />}
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{day.hotel.name}</p>
+                      <p className="text-sm font-medium text-foreground truncate flex items-center gap-1.5">
+                        <span className="truncate">{day.hotel.name}</span>
+                        {day.hotel.warnings?.length > 0 && (
+                          <span title={day.hotel.warnings.join('\n')} className="flex-shrink-0">
+                            <AlertTriangle className="w-3 h-3 text-amber-500" />
+                          </span>
+                        )}
+                      </p>
                       <p className="text-[10px] text-muted-foreground truncate">
                         {day.hotel.roomType || '—'}
                         {day.hotel.mealPlan && ` · ${day.hotel.mealPlan}`}
@@ -2736,6 +3530,22 @@ function DayCard({
                           {day.hotel.rateListName} ({(day.hotel.audienceApplied || []).join(', ')})
                         </p>
                       )}
+                      {/* Surface low/medium PDF-extraction confidence so the
+                          operator reviews the rate before it reaches a
+                          client. 'high'/'' are silent. */}
+                      {['low', 'medium'].includes(day.hotel.extractionConfidence) && (
+                        <p
+                          className={`text-[10px] mt-0.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-semibold ${
+                            day.hotel.extractionConfidence === 'low'
+                              ? 'bg-red-50 text-red-700 border border-red-200'
+                              : 'bg-amber-50 text-amber-700 border border-amber-200'
+                          }`}
+                          title="This rate sheet was transcribed from a PDF with this confidence level. Verify the numbers against the source before sending."
+                        >
+                          <AlertTriangle className="w-2.5 h-2.5" />
+                          {day.hotel.extractionConfidence === 'low' ? 'Low' : 'Medium'}-confidence rate — verify
+                        </p>
+                      )}
                       {day.hotel.mandatoryAddOnsPerNightTotal > 0 && (
                         <p className="text-[10px] text-muted-foreground/70 truncate" title={(day.hotel.mandatoryAddOnsPerNight || []).map(m => m.name).join(', ')}>
                           Includes mandatory: {formatCurrency((day.hotel.mandatoryAddOnsPerNightTotal || 0) * (day.hotel.fxRate || 1), currency)}/night
@@ -2745,6 +3555,61 @@ function DayCard({
                     </div>
                     <button onClick={() => setShowHotelPicker(true)} className="text-[10px] text-primary hover:underline">Change</button>
                   </div>
+
+                  {/* Room-type picker (#2.1). Lists the partner hotel's
+                      available room types; changing it reprices the whole
+                      stay with that preferredRoomType. Without this the
+                      resolver silently defaults to the cheapest room. Only
+                      shown when the hotel offers more than one type. */}
+                  {(() => {
+                    const hotelDoc = hotels.find(h => h._id === day.hotel.hotelId);
+                    const roomTypes = roomTypesForHotel(hotelDoc);
+                    const current = day.hotel.roomType || '';
+                    // Always include the priced room type as an option so the
+                    // select isn't blank if the partner doc drifted.
+                    const options = current && !roomTypes.includes(current)
+                      ? [current, ...roomTypes]
+                      : roomTypes;
+                    if (options.length < 2) return null;
+                    return (
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <label className="text-[10px] text-muted-foreground whitespace-nowrap">Room type</label>
+                        <select
+                          value={current}
+                          onChange={(e) => onChangeRoomType?.(e.target.value)}
+                          className="flex-1 px-2 py-1 rounded-md bg-background border border-border text-[11px] text-foreground focus:outline-none focus:border-primary"
+                        >
+                          {!current && <option value="">Cheapest (auto)</option>}
+                          {options.map(rt => <option key={rt} value={rt}>{rt}</option>)}
+                        </select>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Meal-plan picker (#3.12). Changing it reprices the
+                      whole stay against the rate list with that meal plan.
+                      Only shown when the hotel offers more than one. */}
+                  {(() => {
+                    const hotelDoc = hotels.find(h => h._id === day.hotel.hotelId);
+                    const plans = mealPlansForHotel(hotelDoc);
+                    const current = day.hotel.mealPlan || '';
+                    const options = current && !plans.includes(current)
+                      ? [current, ...plans]
+                      : plans;
+                    if (options.length < 2) return null;
+                    return (
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <label className="text-[10px] text-muted-foreground whitespace-nowrap">Meal plan</label>
+                        <select
+                          value={current}
+                          onChange={(e) => onChangeMealPlan?.(e.target.value)}
+                          className="flex-1 px-2 py-1 rounded-md bg-background border border-border text-[11px] text-foreground focus:outline-none focus:border-primary"
+                        >
+                          {options.map(mp => <option key={mp} value={mp}>{mp}</option>)}
+                        </select>
+                      </div>
+                    );
+                  })()}
 
                   {/* Conditions surfaced by the rate resolver — visa rules,
                       blackout dates, group-size pricing, etc. Blocking ones
@@ -2805,10 +3670,44 @@ function DayCard({
               )}
 
               {showHotelPicker && (
-                <div className="mt-2 p-3 rounded-lg bg-background border border-border max-h-64 overflow-y-auto space-y-1.5">
-                  {matchedHotels.length === 0 ? (
-                    <p className="text-xs text-muted-foreground/70 text-center py-2">No hotels for this location. Add some in Partners.</p>
-                  ) : matchedHotels.map(h => {
+                <div className="mt-2 p-3 rounded-lg bg-background border border-border max-h-72 overflow-y-auto space-y-1.5">
+                  {/* Search + sort (#2.4) — painless triage when an org has
+                      many lodges in a region. Pure client-side over the
+                      already location-matched list. */}
+                  <div className="flex items-center gap-1.5 sticky top-0 bg-background pb-1.5">
+                    <input
+                      type="text"
+                      value={hotelQuery}
+                      onChange={(e) => setHotelQuery(e.target.value)}
+                      placeholder="Search hotels…"
+                      className="flex-1 px-2 py-1 rounded-md bg-card border border-border text-[11px] focus:outline-none focus:border-primary"
+                    />
+                    <select
+                      value={hotelSort}
+                      onChange={(e) => setHotelSort(e.target.value)}
+                      className="px-1.5 py-1 rounded-md bg-card border border-border text-[10px] focus:outline-none focus:border-primary"
+                      title="Sort hotels"
+                    >
+                      <option value="name">Name</option>
+                      <option value="price">$ low→hi</option>
+                      <option value="stars">★ high→lo</option>
+                    </select>
+                  </div>
+                  {(() => {
+                    const q = hotelQuery.trim().toLowerCase();
+                    const list = matchedHotels
+                      .filter(h => !q || `${h.name} ${h.destination || ''} ${h.location || ''}`.toLowerCase().includes(q))
+                      .slice()
+                      .sort((a, b) => {
+                        if (hotelSort === 'price') return cheapestPerPersonOf(a) - cheapestPerPersonOf(b);
+                        if (hotelSort === 'stars') return (b.stars || 0) - (a.stars || 0);
+                        return String(a.name || '').localeCompare(String(b.name || ''));
+                      });
+                    return list.length === 0 ? (
+                    <p className="text-xs text-muted-foreground/70 text-center py-2">
+                      {matchedHotels.length === 0 ? 'No hotels for this location. Add some in Partners.' : `No hotels match “${hotelQuery}”.`}
+                    </p>
+                  ) : list.map(h => {
                     // Preview: show every active rate list's label so operator
                     // can see audience/meal plan options before clicking.
                     const activeLists = (h.rateLists || []).filter(l => l.isActive !== false);
@@ -2836,7 +3735,8 @@ function DayCard({
                         )}
                       </div>
                     );
-                  })}
+                  });
+                  })()}
                   <button onClick={() => setShowHotelPicker(false)} className="text-[10px] text-muted-foreground/70 hover:underline w-full text-right pt-1">Close</button>
                 </div>
               )}
@@ -3496,6 +4396,126 @@ function BlockToggles({ blocks = [], onChange }) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ─── MODALS ─────────────────────────────────────
+// Styled replacements for native confirm()/prompt(). Both mirror the
+// package-picker overlay so the builder keeps one dialog language.
+
+function ConfirmModal({ open, title, message, confirmLabel = 'Confirm', tone = 'default', busy = false, onConfirm, onCancel }) {
+  if (!open) return null;
+  const confirmClasses = tone === 'danger'
+    ? 'bg-red-600 text-white hover:bg-red-700'
+    : 'bg-primary text-white hover:bg-primary/90';
+  return (
+    <div
+      className="fixed inset-0 bg-black/40 z-[60] flex items-start justify-center p-4 pt-[20vh]"
+      onClick={onCancel}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+    >
+      <div onClick={e => e.stopPropagation()} className="bg-card rounded-xl shadow-xl w-full max-w-md">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <h3 className="text-base font-semibold text-foreground">{title}</h3>
+          <button onClick={onCancel} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="p-4">
+          <p className="text-sm text-muted-foreground">{message}</p>
+        </div>
+        <div className="px-4 py-3 border-t border-border flex justify-end gap-2">
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            className="px-3 py-2 rounded-lg bg-card border border-border text-sm font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={busy}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${confirmClasses}`}
+          >
+            {busy ? 'Working…' : confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TemplateModal({ open, defaultName = '', onSubmit, onCancel }) {
+  const [name, setName] = useState(defaultName);
+  const [description, setDescription] = useState('');
+  const [busy, setBusy] = useState(false);
+  // Reset fields each time the modal is (re)opened so a prior entry
+  // doesn't leak into the next save.
+  useEffect(() => {
+    if (open) { setName(defaultName); setDescription(''); setBusy(false); }
+  }, [open, defaultName]);
+  if (!open) return null;
+  const submit = async () => {
+    if (!name.trim()) return;
+    setBusy(true);
+    try { await onSubmit({ name: name.trim(), description: description.trim() }); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div
+      className="fixed inset-0 bg-black/40 z-[60] flex items-start justify-center p-4 pt-[15vh]"
+      onClick={onCancel}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Save as template"
+    >
+      <div onClick={e => e.stopPropagation()} className="bg-card rounded-xl shadow-xl w-full max-w-md">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <h3 className="text-base font-semibold text-foreground">Save as Template</h3>
+          <button onClick={onCancel} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="p-4 space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">Template name</label>
+            <input
+              type="text"
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+              placeholder="e.g. 7-Day Classic Safari"
+              className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">Description <span className="text-muted-foreground/60">(optional)</span></label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={2}
+              placeholder="When to reach for this template"
+              className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors resize-none"
+            />
+          </div>
+        </div>
+        <div className="px-4 py-3 border-t border-border flex justify-end gap-2">
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            className="px-3 py-2 rounded-lg bg-card border border-border text-sm font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={busy || !name.trim()}
+            className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {busy ? 'Saving…' : 'Save Template'}
+          </button>
+        </div>
       </div>
     </div>
   );

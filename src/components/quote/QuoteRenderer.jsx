@@ -127,6 +127,11 @@ const STYLE_PRESETS = {
   },
 };
 
+// Stable per-stay key (hotelId, fallback name). Used to detect a
+// continuation night so per-stay info (rate-list inclusions/exclusions)
+// renders once per stay, not on every night's card (#3.13).
+const hotelStayKey = (d) => (d?.hotel ? `${d.hotel.hotelId || d.hotel.name}` : null);
+
 // Walk consecutive same-hotel days and emit one record per stay so we can
 // scale per-night fees correctly without N+1ing on snapshot duplicates.
 function eachStaySegment(days) {
@@ -472,6 +477,12 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
   // booking policy (deposit/cancellation/terms) — both aggregated from per-day
   // hotel snapshots and the package snapshot when present.
   const tripFees = collectFees(quote.days);
+  // Mandatory pass-through fees are ALREADY rolled into pricing.totalPrice
+  // by the builder; they must be presented as "included", never as an
+  // addition to the total. Genuinely optional pass-through fees (rare) are
+  // not in the total and are shown separately as payable locally.
+  const includedFees = tripFees.filter(f => f.mandatory);
+  const optionalFees = tripFees.filter(f => !f.mandatory);
   const tripPolicy = collectPolicy(quote);
   const tripConditions = collectConditions(quote);
   const tripAddOns = collectAddOns(quote.days);
@@ -816,7 +827,8 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                               <img src={pickHero(day.hotel.images).url} alt={day.hotel.name} className="w-full h-28 object-cover block" />
                             </div>
                           )}
-                          {(day.hotel.inclusions?.length > 0) && (day.hotel.inclusionsDisplay || 'day') === 'day' && (
+                          {(day.hotel.inclusions?.length > 0) && (day.hotel.inclusionsDisplay || 'day') === 'day'
+                            && !(i > 0 && hotelStayKey(days[i - 1]) != null && hotelStayKey(days[i - 1]) === hotelStayKey(day)) && (
                             <div className="mt-3 pt-3 border-t border-stone-100">
                               <p className="text-[10px] uppercase tracking-wider text-stone-400 font-semibold mb-1.5">Included at this stay</p>
                               <ul className="space-y-0.5">
@@ -828,7 +840,8 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                               </ul>
                             </div>
                           )}
-                          {(day.hotel.exclusions?.length > 0) && (day.hotel.exclusionsDisplay || 'day') === 'day' && (
+                          {(day.hotel.exclusions?.length > 0) && (day.hotel.exclusionsDisplay || 'day') === 'day'
+                            && !(i > 0 && hotelStayKey(days[i - 1]) != null && hotelStayKey(days[i - 1]) === hotelStayKey(day)) && (
                             <div className="mt-3 pt-3 border-t border-stone-100">
                               <p className="text-[10px] uppercase tracking-wider text-stone-400 font-semibold mb-1.5">Not included at this stay</p>
                               <ul className="space-y-0.5">
@@ -909,6 +922,16 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                   {hotel.roomType && <p className="text-xs text-stone-500 mt-2">{hotel.roomType}</p>}
                   {hotel.mealPlan && (
                     <p className="text-xs text-stone-500 mt-1">{mealPlanLabels[hotel.mealPlan] || hotel.mealPlan}</p>
+                  )}
+                  {/* Mandatory add-ons folded into the nightly rate (resort
+                      fee, conservancy access, etc.) — names only, so the
+                      client understands the rate is inclusive and doesn't
+                      ask "what's a resort fee?" (#3.7). */}
+                  {hotel.mandatoryAddOnsPerNight?.length > 0 && (
+                    <p className="text-[11px] text-stone-500 mt-1.5">
+                      <span className="font-semibold text-stone-600">Rate includes:</span>{' '}
+                      {hotel.mandatoryAddOnsPerNight.map(m => m.name).filter(Boolean).join(', ')}
+                    </p>
                   )}
                   {hotel.description && (
                     <p className="text-sm text-stone-600 mt-3 leading-relaxed line-clamp-3">{hotel.description}</p>
@@ -1020,22 +1043,83 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                 {formatCurrency(quote.pricing?.totalPrice || 0, quote.pricing?.currency)}
               </span>
             </div>
-            {totalPax > 0 && (
-              <p className="text-sm text-stone-400 text-right">
-                {formatCurrency(quote.pricing?.perPersonPrice || 0, quote.pricing?.currency)} per person
-              </p>
+            {totalPax > 0 && (() => {
+              // #4.1 — only "per adult" is exact (total ÷ adults) and only
+              // when there are no children. With children the adult/child
+              // split isn't derivable client-side (margin/cost stripped),
+              // so we show an explicit AVERAGE rather than a misleading
+              // "per person" a solo adult could never actually book.
+              const adults = Number(quote.travelers?.adults) || 0;
+              const children = Number(quote.travelers?.children)
+                || (quote.travelers?.childAges?.length || 0);
+              const total = Number(quote.pricing?.totalPrice) || 0;
+              const cur = quote.pricing?.currency;
+              if (children === 0 && adults > 0) {
+                return (
+                  <p className="text-sm text-stone-400 text-right">
+                    From {formatCurrency(Math.round(total / adults), cur)} per adult
+                  </p>
+                );
+              }
+              return (
+                <div className="text-right">
+                  <p className="text-sm text-stone-400">
+                    {formatCurrency(quote.pricing?.perPersonPrice || 0, cur)} avg / traveller
+                  </p>
+                  <p className="text-[11px] text-stone-300">
+                    Adults and children are priced differently — ask us for the per-adult / per-child breakdown.
+                  </p>
+                </div>
+              );
+            })()}
+
+            {/* Mandatory park / conservancy / government fees. The builder
+                rolls these INTO pricing.totalPrice, so we present them as
+                already included — itemised for transparency, never as an
+                addition to the total above (which is what eroded trust). */}
+            {includedFees.length > 0 && (
+              <div className="mt-6 pt-5 border-t border-stone-200">
+                <div className="flex items-center justify-between mb-2 gap-3">
+                  <p className="text-xs font-bold uppercase tracking-wider text-stone-400">
+                    Park &amp; Government Fees
+                  </p>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-0.5 whitespace-nowrap">
+                    Included in total
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {includedFees.map((fee, i) => (
+                    <div key={i} className="flex items-center justify-between text-sm gap-3">
+                      <div className="text-stone-600 min-w-0 truncate">
+                        {fee.name}
+                        {fee.source && <span className="text-stone-400 italic"> — {fee.source}</span>}
+                      </div>
+                      <div className="text-stone-500 font-medium whitespace-nowrap">
+                        {formatCurrency(fee.amount, quote.pricing?.currency)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-stone-400 mt-2 italic">
+                  These mandatory park, conservancy and government fees are already part of the total above — itemised here for transparency. Collected by the property and remitted to the issuing authority.
+                </p>
+              </div>
             )}
 
-            {/* Pass-through fees — park, community, government levies. These
-                are not auto-added to the nightly cost; they're surfaced here
-                so the client knows exactly what they're paying for. */}
-            {tripFees.length > 0 && (
+            {/* Genuinely optional pass-through fees are NOT in the total —
+                payable directly only if the traveller chooses them. */}
+            {optionalFees.length > 0 && (
               <div className="mt-6 pt-5 border-t border-stone-200">
-                <p className="text-xs font-bold uppercase tracking-wider text-stone-400 mb-2">
-                  Park & Government Fees
-                </p>
+                <div className="flex items-center justify-between mb-2 gap-3">
+                  <p className="text-xs font-bold uppercase tracking-wider text-stone-400">
+                    Optional Fees — Payable Locally
+                  </p>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-500 bg-stone-100 border border-stone-200 rounded px-2 py-0.5 whitespace-nowrap">
+                    Not included
+                  </span>
+                </div>
                 <div className="space-y-1.5">
-                  {tripFees.map((fee, i) => (
+                  {optionalFees.map((fee, i) => (
                     <div key={i} className="flex items-center justify-between text-sm gap-3">
                       <div className="text-stone-600 min-w-0 truncate">
                         {fee.name}
@@ -1048,7 +1132,7 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                   ))}
                 </div>
                 <p className="text-[11px] text-stone-400 mt-2 italic">
-                  Pass-through fees collected by the property and remitted to the issuing authority.
+                  Not included in your total — paid directly to the property or authority only if you choose these.
                 </p>
               </div>
             )}
@@ -1116,57 +1200,81 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
               )}
             </div>
 
-            {tripPolicy.depositPct > 0 && (
-              <div className="flex items-center gap-3">
-                <div className="text-2xl font-bold" style={{ color: primaryColor }}>
-                  {tripPolicy.depositPct}%
-                </div>
-                <div className="text-sm text-stone-600">
-                  Deposit due at booking
-                  <p className="text-xs text-stone-400">
-                    Balance due before travel commences.
-                  </p>
-                </div>
-              </div>
-            )}
+            {(() => {
+              // When the operator has written their own payment terms, that
+              // is the canonical policy. Per-hotel deposit % and cancellation
+              // tiers (aggregated from each lodge) then become a secondary,
+              // collapsed reference rather than competing policies the client
+              // has to reconcile (#4.3). With no paymentTerms text, keep the
+              // full aggregated display.
+              const policyOverridden = !!(quote.paymentTerms && quote.paymentTerms.trim());
+              const hasPerHotel = tripPolicy.depositPct > 0 || tripPolicy.cancellationTiers.length > 0;
+              if (!hasPerHotel) return null;
+              const blocks = (
+                <>
+                  {tripPolicy.depositPct > 0 && (
+                    <div className="flex items-center gap-3">
+                      <div className="text-2xl font-bold" style={{ color: primaryColor }}>
+                        {tripPolicy.depositPct}%
+                      </div>
+                      <div className="text-sm text-stone-600">
+                        Deposit due at booking
+                        <p className="text-xs text-stone-400">
+                          Balance due before travel commences.
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
-            {tripPolicy.cancellationTiers.length > 0 && (
-              <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-stone-400 mb-2">
-                  Cancellation Policy
-                </p>
-                <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-stone-200 bg-stone-50">
-                        <th className="text-left py-2 px-3 text-[11px] font-semibold text-stone-400 uppercase tracking-wider">Days Before Travel</th>
-                        <th className="text-right py-2 px-3 text-[11px] font-semibold text-stone-400 uppercase tracking-wider">Penalty</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tripPolicy.cancellationTiers.map((t, i) => (
-                        <tr key={i} className="border-b border-stone-100 last:border-0">
-                          <td className="py-2 px-3 text-stone-600">
-                            {t.daysBefore}+ days
-                            {t.sources && t.sources.length > 0 && (
-                              <span className="text-[10px] text-stone-400 italic ml-2">
-                                ({t.sources.join(', ')})
-                              </span>
-                            )}
-                            {t.notes && (
-                              <span className="text-[10px] text-stone-400 ml-2">— {t.notes}</span>
-                            )}
-                          </td>
-                          <td className="py-2 px-3 text-right text-stone-700 font-semibold">
-                            {formatPenalty(t, quote.pricing?.currency || quote.currency || 'USD')}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
+                  {tripPolicy.cancellationTiers.length > 0 && (
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider text-stone-400 mb-2">
+                        Cancellation Policy
+                      </p>
+                      <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-stone-200 bg-stone-50">
+                              <th className="text-left py-2 px-3 text-[11px] font-semibold text-stone-400 uppercase tracking-wider">Days Before Travel</th>
+                              <th className="text-right py-2 px-3 text-[11px] font-semibold text-stone-400 uppercase tracking-wider">Penalty</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {tripPolicy.cancellationTiers.map((t, i) => (
+                              <tr key={i} className="border-b border-stone-100 last:border-0">
+                                <td className="py-2 px-3 text-stone-600">
+                                  {t.daysBefore}+ days
+                                  {t.sources && t.sources.length > 0 && (
+                                    <span className="text-[10px] text-stone-400 italic ml-2">
+                                      ({t.sources.join(', ')})
+                                    </span>
+                                  )}
+                                  {t.notes && (
+                                    <span className="text-[10px] text-stone-400 ml-2">— {t.notes}</span>
+                                  )}
+                                </td>
+                                <td className="py-2 px-3 text-right text-stone-700 font-semibold">
+                                  {formatPenalty(t, quote.pricing?.currency || quote.currency || 'USD')}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+              if (!policyOverridden) return blocks;
+              return (
+                <details className="group">
+                  <summary className="cursor-pointer text-xs text-stone-500 hover:text-stone-700 select-none">
+                    Some properties have their own deposit / cancellation terms — view
+                  </summary>
+                  <div className="mt-4 space-y-5">{blocks}</div>
+                </details>
+              );
+            })()}
 
             {tripConditions.length > 0 && (
               <div>

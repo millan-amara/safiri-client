@@ -86,6 +86,26 @@
     font-feature-settings: "rlig" 1, "calt" 1;
     -webkit-font-smoothing: antialiased;
   }
+
+  /* Visible keyboard focus. Many controls use `focus:outline-none` with
+     only a border-color change, which keyboard users can't track. This
+     adds a non-layout-shifting ring on :focus-visible (keyboard / a11y
+     tools) without affecting mouse focus. Uses the existing --color-ring
+     token so it matches the design system app-wide. */
+  :where(
+    button, a, input, select, textarea,
+    [role="button"], [tabindex]:not([tabindex="-1"])
+  ):focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--color-background), 0 0 0 4px var(--color-ring);
+  }
+  /* High-contrast / forced-colors: keep a real outline. */
+  @media (forced-colors: active) {
+    :where(button, a, input, select, textarea, [role="button"]):focus-visible {
+      outline: 2px solid Highlight;
+      box-shadow: none;
+    }
+  }
 }
 
 /* ─── Scrollbar ───────────────────────────────── */
