@@ -3,7 +3,6 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Compass, Eye, EyeOff } from 'lucide-react';
 import toast from 'react-hot-toast';
-import api from '../utils/api';
 
 const OAUTH_ERRORS = {
   oauth_failed: 'Google login failed. Please try again.',
@@ -18,9 +17,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, loginWithOAuthCode } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  // True while a Google OAuth code is being redeemed — show a spinner, not the
+  // form, so the login UI doesn't flash for the ~1 round-trip exchange takes.
+  const [oauthPending, setOauthPending] = useState(() => !!searchParams.get('oauth_code'));
 
   // Handle Google OAuth callback. The server now returns a single-use exchange
   // code (via ?oauth_code=) instead of the JWT itself, so the JWT never lands
@@ -32,20 +34,23 @@ export default function LoginPage() {
       // Strip the code from the URL immediately so a back-button or refresh
       // doesn't show it. Then exchange it for the real session token.
       window.history.replaceState({}, '', window.location.pathname);
-      api.post('/auth/oauth-exchange', { code })
-        .then(({ data }) => {
-          localStorage.setItem('token', data.token);
+      loginWithOAuthCode(code)
+        .then(() => {
           toast.success('Welcome!');
           navigate('/');
-          window.location.reload();
         })
         .catch(() => {
+          // Exchange failed — drop the spinner and show the form again.
+          setOauthPending(false);
           toast.error('Login link expired. Please try signing in again.');
         });
     }
     if (error) {
       toast.error(OAUTH_ERRORS[error] || 'Sign-in failed. Please try again.');
     }
+    // Runs once per callback render — keyed on searchParams. loginWithOAuthCode
+    // is intentionally omitted so a re-render can't re-redeem the one-time code.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, navigate]);
 
   const handleSubmit = async (e) => {
@@ -61,6 +66,20 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+  if (oauthPending) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
+            <Compass className="w-5 h-5 text-white" />
+          </div>
+          <div className="w-6 h-6 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
+          <p className="text-sm text-muted-foreground">Signing you in…</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex">

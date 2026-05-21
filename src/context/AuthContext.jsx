@@ -35,6 +35,16 @@ export function AuthProvider({ children }) {
     return data;
   };
 
+  // Redeem a one-time Google OAuth code for a session. Mirrors login() —
+  // sets context state so the app is authenticated without a full page reload.
+  const loginWithOAuthCode = async (code) => {
+    const { data } = await api.post('/auth/oauth-exchange', { code });
+    localStorage.setItem('token', data.token);
+    setUser(data.user);
+    setOrganization(data.organization);
+    return data;
+  };
+
   const register = async (formData) => {
     const { data } = await api.post('/auth/register', formData);
     localStorage.setItem('token', data.token);
@@ -68,7 +78,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, organization, loading, login, register, logout, updateOrganization, refreshOrganization }}>
+    <AuthContext.Provider value={{ user, organization, loading, login, loginWithOAuthCode, register, logout, updateOrganization, refreshOrganization }}>
       {children}
     </AuthContext.Provider>
   );
