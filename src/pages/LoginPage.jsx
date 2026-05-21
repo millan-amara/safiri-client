@@ -126,8 +126,8 @@ export default function LoginPage() {
             </button>
           </form>
 
-          {/* Google sign-in temporarily disabled — pending Google OAuth app approval for production */}
-          {/*
+          {/* Google sign-in */}
+    
           <div className="flex items-center gap-3 my-5">
             <div className="flex-1 h-px bg-muted" />
             <span className="text-xs text-muted-foreground/70">or</span>
@@ -146,7 +146,6 @@ export default function LoginPage() {
             </svg>
             Continue with Google
           </a>
-          */}
 
           <div className="mt-6 text-center">
             <p className="text-sm text-muted-foreground">
