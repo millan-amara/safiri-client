@@ -445,9 +445,14 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
   // hotel name as attribution so the client knows which stay each line refers
   // to. Dedupe keeps quote-level items (operator-curated) at the top and
   // suppresses an exact duplicate from a hotel.
+  // Normalize for dedup: lowercase + collapse whitespace + strip trailing
+  // punctuation so "Park fees" and "Park fees." and "park  fees" all collapse
+  // to one line. Operators paste from many sources; near-duplicates were the
+  // main visible source of clutter on finished proposals.
+  const normalize = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').replace(/[.,;:!?]+\s*$/, '').trim();
   const buildMergedList = (kind /* 'inclusions' | 'exclusions' */, prefKey /* 'inclusionsDisplay' | 'exclusionsDisplay' */) => {
     const baseList = (quote[kind] || []).map(text => ({ text, source: null }));
-    const baseSet = new Set(baseList.map(b => b.text));
+    const baseSet = new Set(baseList.map(b => normalize(b.text)));
     const merged = [];
     const mergedSeen = new Set();
     const seenStays = new Set();
@@ -462,9 +467,11 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
       const pref = h[prefKey] || 'day';
       if (pref !== 'merged') continue;
       for (const item of (h[kind] || [])) {
-        const key = `${item}::${h.name}`;
-        if (baseSet.has(item) || mergedSeen.has(key)) continue;
-        mergedSeen.add(key);
+        const norm = normalize(item);
+        if (!norm) continue;
+        const seenKey = `${norm}::${h.name}`;
+        if (baseSet.has(norm) || mergedSeen.has(seenKey)) continue;
+        mergedSeen.add(seenKey);
         merged.push({ text: item, source: h.name });
       }
     }
@@ -487,11 +494,15 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
   const tripConditions = collectConditions(quote);
   const tripAddOns = collectAddOns(quote.days);
 
+  // Quick-fact cells mirror the PDF cover so both surfaces show the same trip
+  // shape at a glance. Start point is intentionally omitted — it's already in
+  // the route-map section header and the "at a glance" lead line.
+  const tourTypeLabel = (quote.tourType || 'private');
   const quickFacts = [
-    { icon: Calendar, label: 'Duration', value: `${totalDays} Days / ${totalNights} Nights` },
-    { icon: UsersIcon, label: 'Travelers', value: `${totalPax} Traveler${totalPax !== 1 ? 's' : ''}` },
-    { icon: MapPin, label: 'Start', value: quote.startPoint },
-    { icon: Calendar, label: 'Date', value: quote.startDate ? formatDate(quote.startDate) : 'TBD' },
+    { icon: Calendar, label: 'Duration', value: `${totalDays}D / ${totalNights}N` },
+    { icon: UsersIcon, label: 'Travelers', value: `${totalPax} ${totalPax === 1 ? 'Guest' : 'Guests'}` },
+    { icon: Calendar, label: 'Departs', value: quote.startDate ? formatDate(quote.startDate, { month: 'short', day: 'numeric', year: 'numeric' }) : 'TBD' },
+    { icon: MapPin, label: 'Tour Type', value: tourTypeLabel.charAt(0).toUpperCase() + tourTypeLabel.slice(1) },
   ];
 
   const FactCard = ({ icon: Icon, label, value, dark = false }) => (
@@ -679,6 +690,8 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
               <button
                 onClick={() => setActiveDay(activeDay === i ? -1 : i)}
                 className="w-full flex items-center gap-4 p-5 bg-white hover:bg-stone-50 transition-colors text-left"
+                aria-expanded={activeDay === i}
+                aria-controls={`day-panel-${i}`}
               >
                 <div className="w-14 h-14 rounded-xl flex flex-col items-center justify-center flex-shrink-0 text-white" style={{ backgroundColor: primaryColor }}>
                   <span className="text-[9px] uppercase tracking-wider font-semibold opacity-80">Day</span>
@@ -702,6 +715,9 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
 
               {/* Day content */}
               <div
+                id={`day-panel-${i}`}
+                role="region"
+                aria-hidden={activeDay !== i}
                 className={`grid transition-all duration-500 ease-out ${
                   activeDay === i ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
                 }`}
@@ -1408,27 +1424,29 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
             </div>
           )}
 
-          {(brand.coverQuote || true) && (() => {
-            const q = brand.coverQuote || "One's destination is never a place, but a new way of seeing things.";
-            const author = brand.coverQuote ? (brand.coverQuoteAuthor || '') : 'Henry Miller';
-            return (
-              <div className="mt-12 text-center">
-                <p className="text-base sm:text-lg text-stone-400 italic leading-relaxed" style={{ fontFamily: style.heading }}>
-                  "{q}"
-                </p>
-                {author && (
-                  <p className="text-[10px] tracking-[0.25em] uppercase text-stone-300 mt-3">— {author}</p>
-                )}
-              </div>
-            );
-          })()}
+          {/* The closing quote is opt-in via brand.coverQuote. When the
+              operator hasn't set one, we omit it entirely — the original
+              `|| true` short-circuited the check and forced the Henry Miller
+              fallback on every itinerary. Explicit empty-string ('') from
+              the operator also suppresses (lets them turn it off without
+              clearing it from the form). */}
+          {brand.coverQuote && (
+            <div className="mt-12 text-center">
+              <p className="text-base sm:text-lg text-stone-400 italic leading-relaxed" style={{ fontFamily: style.heading }}>
+                "{brand.coverQuote}"
+              </p>
+              {brand.coverQuoteAuthor && (
+                <p className="text-[10px] tracking-[0.25em] uppercase text-stone-300 mt-3">— {brand.coverQuoteAuthor}</p>
+              )}
+            </div>
+          )}
 
           <div className="mt-12 pt-6 border-t border-stone-200 flex items-center justify-between">
             <p className="text-xs text-stone-400">
               Quote #{quote.quoteNumber} · Version {quote.version || 1}
             </p>
             <p className="text-xs text-stone-400">
-              Powered by Safari CRM
+              Powered by SafiriPro
             </p>
           </div>
         </div>
@@ -1488,22 +1506,51 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
   );
 }
 
-// Kenya destination coordinates
+// East-Africa destination coordinates
 const DEST_COORDS = {
+  // Kenya
   'nairobi': [-1.29, 36.82], 'maasai mara': [-1.5, 35.0], 'masai mara': [-1.5, 35.0],
+  'mara': [-1.5, 35.0], 'mara north': [-1.27, 35.16], 'mara triangle': [-1.4, 35.0],
   'amboseli': [-2.65, 37.25], 'tsavo east': [-2.9, 38.7], 'tsavo west': [-3.0, 38.2],
   'diani': [-4.32, 39.58], 'diani beach': [-4.32, 39.58], 'mombasa': [-4.04, 39.67],
   'naivasha': [-0.72, 36.36], 'lake naivasha': [-0.72, 36.36], 'nakuru': [-0.37, 36.08],
   'lake nakuru': [-0.37, 36.08], 'samburu': [0.6, 37.5], 'nanyuki': [0.0, 37.07],
   'mount kenya': [-0.15, 37.3], 'lamu': [-2.27, 40.9], 'malindi': [-3.22, 40.12],
-  'watamu': [-3.35, 40.02],
+  'watamu': [-3.35, 40.02], 'laikipia': [0.4, 36.85], 'ol pejeta': [0.0, 36.92],
+  'lake bogoria': [0.25, 36.10], 'lake elementaita': [-0.45, 36.25],
+  'meru': [0.05, 38.20], 'meru national park': [0.18, 38.20],
+  'kisumu': [-0.10, 34.75], 'kakamega': [0.30, 34.75],
+  // Tanzania
+  'serengeti': [-2.33, 34.83], 'ngorongoro': [-3.16, 35.55], 'ngorongoro crater': [-3.16, 35.55],
+  'tarangire': [-3.83, 36.0], 'lake manyara': [-3.5, 35.83],
+  'arusha': [-3.37, 36.69], 'moshi': [-3.35, 37.34], 'kilimanjaro': [-3.07, 37.35],
+  'zanzibar': [-6.13, 39.31], 'stone town': [-6.16, 39.19], 'nungwi': [-5.72, 39.30],
+  'dar es salaam': [-6.79, 39.21], 'selous': [-8.50, 37.50], 'nyerere': [-8.50, 37.50],
+  'ruaha': [-7.7, 35.0], 'mafia island': [-7.85, 39.78], 'pemba': [-5.20, 39.78],
+  // Uganda
+  'kampala': [0.33, 32.58], 'entebbe': [0.05, 32.45],
+  'bwindi': [-1.05, 29.62], 'queen elizabeth': [-0.20, 30.05],
+  'murchison falls': [2.27, 31.68], 'kibale': [0.55, 30.40],
+  'lake mburo': [-0.60, 30.95], 'mgahinga': [-1.37, 29.65],
+  'kidepo': [3.92, 33.85], 'jinja': [0.43, 33.20],
+  // Rwanda
+  'kigali': [-1.95, 30.06], 'volcanoes': [-1.48, 29.49], 'musanze': [-1.50, 29.63],
+  'akagera': [-1.85, 30.72], 'nyungwe': [-2.43, 29.20], 'lake kivu': [-2.05, 29.20],
 };
 
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// Sort once, longest-first, so specific keys ("mara north") beat the generic
+// fallback ("mara") during the word-boundary loop below.
+const DEST_KEYS_LONGEST_FIRST = Object.keys(DEST_COORDS).sort((a, b) => b.length - a.length);
 function getCoords(name) {
   if (!name) return null;
   const key = name.toLowerCase().trim();
-  for (const [k, v] of Object.entries(DEST_COORDS)) {
-    if (key.includes(k) || k.includes(key)) return v;
+  // Prefer exact match — otherwise a generic "Lake" matches the first lake.
+  if (DEST_COORDS[key]) return DEST_COORDS[key];
+  // Word-boundary contains so "mara" inside "samaria" doesn't match.
+  for (const k of DEST_KEYS_LONGEST_FIRST) {
+    const re = new RegExp(`\\b${escapeRegex(k)}\\b`);
+    if (re.test(key)) return DEST_COORDS[k];
   }
   return null;
 }
