@@ -183,6 +183,11 @@ export default function HotelModal({ hotel, onClose, onSaved }) {
       if (form.destination) fd.append('destination', form.destination);
       const { data } = await api.post('/partners/hotels/extract-pdf', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        // Rate-card extraction streams a large Claude generation server-side and
+        // can legitimately take several minutes. Disable any client timeout so
+        // the request isn't aborted mid-extraction (matches the server's
+        // streaming fix for the same long-running call).
+        timeout: 0,
       });
       const drafts = (data.drafts || []).map(shapeExtractedHotel);
       const packages = data.packages || [];
