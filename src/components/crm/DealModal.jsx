@@ -46,7 +46,11 @@ export default function DealModal({ deal, pipelines, contacts, team, onClose, on
     arrivalCity: deal?.arrivalCity || '',
     tripType: deal?.tripType || '',
     tripDuration: deal?.tripDuration || '',
-    groupSize: deal?.groupSize || '',
+    // Party split. Legacy fallback: an old deal with only groupSize shows that
+    // total as adults so nothing is lost on edit.
+    adults: deal?.adults || deal?.groupSize || '',
+    children: deal?.children || '',
+    childAges: (deal?.childAges || []).join(', '),
     budget: deal?.budget || '',
     budgetCurrency: deal?.budgetCurrency || 'USD',
     startDate: deal?.travelDates?.start?.split('T')[0] || '',
@@ -87,7 +91,10 @@ export default function DealModal({ deal, pipelines, contacts, team, onClose, on
         arrivalCity: form.arrivalCity,
         tripType: form.tripType,
         tripDuration: parseInt(form.tripDuration) || 0,
-        groupSize: parseInt(form.groupSize) || 0,
+        adults: parseInt(form.adults) || 0,
+        children: parseInt(form.children) || 0,
+        childAges: String(form.childAges || '').split(',').map(s => parseInt(s.trim(), 10)).filter(Number.isFinite),
+        groupSize: (parseInt(form.adults) || 0) + (parseInt(form.children) || 0),
         budget: parseFloat(form.budget) || 0,
         budgetCurrency: form.budgetCurrency,
         travelDates: {
@@ -198,9 +205,20 @@ export default function DealModal({ deal, pipelines, contacts, team, onClose, on
             <input type="number" min={0} value={form.tripDuration} onChange={e => setForm({...form, tripDuration: e.target.value})} className={inputCls} placeholder="10" />
           </div>
           <div>
-            <label className={labelCls}>Group Size</label>
-            <input type="number" min={1} value={form.groupSize} onChange={e => setForm({...form, groupSize: e.target.value})} className={inputCls} placeholder="4" />
+            <label className={labelCls}>Adults</label>
+            <input type="number" min={0} value={form.adults} onChange={e => setForm({...form, adults: e.target.value})} className={inputCls} placeholder="2" />
           </div>
+          <div>
+            <label className={labelCls}>Children</label>
+            <input type="number" min={0} value={form.children} onChange={e => setForm({...form, children: e.target.value})} className={inputCls} placeholder="0" />
+          </div>
+          <div>
+            <label className={labelCls}>Child ages</label>
+            <input type="text" value={form.childAges} onChange={e => setForm({...form, childAges: e.target.value})} className={inputCls} placeholder="5, 9" />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
           <div>
             <label className={labelCls}>Start Date</label>
             <input type="date" value={form.startDate} onChange={e => setForm({...form, startDate: e.target.value})} className={inputCls} />

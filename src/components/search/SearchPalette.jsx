@@ -135,6 +135,59 @@ function DiagnosticClean({ label }) {
   );
 }
 
+function fmtMoney(n, currency = 'USD') {
+  const num = Number(n);
+  if (!Number.isFinite(num)) return '—';
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 0 }).format(num);
+  } catch {
+    return `${currency} ${Math.round(num).toLocaleString()}`;
+  }
+}
+
+// Deterministic child-cost table for child_policy lookups. Reads the
+// server-computed figures (estimate.perAge) so it's correct independent of the
+// LLM prose above it — the operator gets a number they can quote verbatim.
+function ChildEstimateTable({ estimate }) {
+  if (!estimate?.perAge?.length) return null;
+  const cur = estimate.quoteCurrency || estimate.sourceCurrency || 'USD';
+  const scope = [estimate.roomType, estimate.seasonLabel, estimate.rateListName]
+    .filter(Boolean).join(' · ');
+  return (
+    <div className="mt-4 rounded-lg border border-sand-200 overflow-hidden">
+      <div className="px-3 py-2 bg-sand-50 text-[11px] text-sand-600 flex items-center justify-between">
+        <span>Per night, sharing with adults</span>
+        <span className="font-medium text-slate-brand">
+          Adult {fmtMoney(estimate.adultPerPersonInQuoteCurrency, cur)}/pp
+        </span>
+      </div>
+      <table className="w-full text-sm">
+        <tbody>
+          {estimate.perAge.map((c, i) => (
+            <tr key={i} className="border-t border-sand-100">
+              <td className="px-3 py-1.5 text-slate-brand">{c.age} yr{c.age === 1 ? '' : 's'}</td>
+              <td className="px-3 py-1.5 text-right font-semibold text-slate-brand">
+                {fmtMoney(c.amountInQuoteCurrency, cur)}
+              </td>
+              <td className="px-3 py-1.5 text-right text-[11px] text-sand-500 whitespace-nowrap">
+                {c.mode === 'free' ? 'free'
+                  : c.mode === 'no_bracket_adult_rate' ? 'full adult rate'
+                  : c.mode === 'flat' ? 'flat rate'
+                  : `${c.discountPctVsAdult}% off adult`}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {scope && (
+        <div className="px-3 py-1.5 bg-sand-50 text-[10px] text-sand-500 border-t border-sand-100">
+          Based on {scope}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LookupAnswer({ lookup, answer, onView }) {
   return (
     <div className="px-5 py-5">
@@ -168,6 +221,12 @@ function LookupAnswer({ lookup, answer, onView }) {
         <p className="mt-4 text-xs text-sand-500 italic">
           Couldn't generate an answer right now. Open the partner to view the underlying data directly.
         </p>
+      )}
+
+      {/* Exact computed child costs — the deterministic source of truth behind
+          the prose above. Shown whenever the resolver could price the ages. */}
+      {lookup.topic === 'child_policy' && (
+        <ChildEstimateTable estimate={lookup.childPolicy?.estimate} />
       )}
 
       {/* Action — deep-link to PartnersPage so the operator can verify. */}

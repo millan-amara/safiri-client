@@ -6,7 +6,7 @@ import { formatCurrency, cldThumb, formatDuration } from '../utils/helpers';
 import toast from 'react-hot-toast';
 import QuoteRenderer from '../components/quote/QuoteRenderer';
 import {
-  ArrowLeft, Plus, GripVertical, Trash2, MapPin, Hotel, Ticket, FileText,
+  ArrowLeft, Plus, GripVertical, Trash2, Hotel, Ticket, FileText,
   Truck, DollarSign, Save, Send, Eye, ChevronDown, ChevronUp,
   Sparkles, X, Calendar, Users as UsersIcon, Copy, Image as ImageIcon,
   Coffee, Sun, Sunset, Star, EyeOff, CheckCircle, Clock, AlertTriangle,
@@ -265,25 +265,18 @@ export default function QuoteBuilderPage() {
   const isDirty = () => savedRef.current !== null
     && JSON.stringify(quoteRef.current) !== savedRef.current;
 
-  // Load partner data
+  // Load partner data. Each request sets its own slice as it resolves rather
+  // than one Promise.all — so the deal/contact pickers (light payloads) populate
+  // immediately instead of waiting on the slowest call (hotels, with rate lists
+  // + images). Independent .catch keeps one failure from blocking the rest.
   useEffect(() => {
-    Promise.all([
-      api.get('/partners/hotels'),
-      api.get('/partners/activities'),
-      api.get('/partners/transport'),
-      api.get('/partners/packages'),
-      api.get('/crm/contacts'),
-      api.get('/destinations'),
-      api.get('/crm/deals'),
-    ]).then(([h, a, t, p, c, d, dl]) => {
-      setHotels(h.data.hotels);
-      setActivities(a.data.activities);
-      setTransport(t.data.transport);
-      setPackages(p.data.packages || []);
-      setContacts(c.data.contacts);
-      setDestinations(d.data.destinations);
-      setDeals(dl.data.deals || []);
-    });
+    api.get('/crm/deals').then(r => setDeals(r.data.deals || [])).catch(() => {});
+    api.get('/crm/contacts').then(r => setContacts(r.data.contacts || [])).catch(() => {});
+    api.get('/destinations').then(r => setDestinations(r.data.destinations || [])).catch(() => {});
+    api.get('/partners/hotels').then(r => setHotels(r.data.hotels || [])).catch(() => {});
+    api.get('/partners/activities').then(r => setActivities(r.data.activities || [])).catch(() => {});
+    api.get('/partners/transport').then(r => setTransport(r.data.transport || [])).catch(() => {});
+    api.get('/partners/packages').then(r => setPackages(r.data.packages || [])).catch(() => {});
   }, []);
 
   // Apply a package: populates quote.days from the (server-hydrated) segments
@@ -521,34 +514,42 @@ export default function QuoteBuilderPage() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, []);
 
-  // New quote arriving from a deal page (`/quotes/new?deal=<id>`) — pre-fill
-  // the deal link, derived contact, travel dates, and party size from the
-  // deal so the operator doesn't re-key context they already entered. Runs
-  // only once `deals` has loaded so we can find the source object.
-  useEffect(() => {
-    if (id) return;                          // editing an existing quote — skip
-    const dealParam = searchParams.get('deal');
-    if (!dealParam) return;
-    if (!deals.length) return;               // wait for fetch
-    if (quote.deal) return;                  // already populated (e.g. user edited)
-
-    const source = deals.find(d => d._id === dealParam);
+  // Apply a deal's context to the quote. Shared by BOTH entry points — the
+  // "Create Quote" link from the deal panel and the in-builder deal picker.
+  //
+  // `overwrite` = the operator is SWITCHING from a previously-selected deal
+  // (e.g. they misclicked). The new deal is then authoritative and fully
+  // replaces the old deal's values, INCLUDING emptiness ("0 children" really
+  // means 0). When false (first pick onto a possibly hand-typed quote), we only
+  // fill blanks so the operator's own typing is never clobbered.
+  const applyDealToQuote = (source, { overwrite = false } = {}) => {
     if (!source) return;
-
     const contactId = source.contact?._id || source.contact || '';
-    const startDate = source.travelDates?.start ? new Date(source.travelDates.start).toISOString().slice(0, 10) : '';
-    const endDate = source.travelDates?.end ? new Date(source.travelDates.end).toISOString().slice(0, 10) : '';
+    const dealStart = source.travelDates?.start ? new Date(source.travelDates.start).toISOString().slice(0, 10) : '';
+    const dealEnd = source.travelDates?.end ? new Date(source.travelDates.end).toISOString().slice(0, 10) : '';
+    // Adults: prefer the explicit split, fall back to groupSize-as-adults for
+    // legacy deals. Never blanks to 0 — a quote always needs at least the
+    // current adult count.
+    const dealAdults = source.adults > 0 ? source.adults : (source.groupSize > 0 ? source.groupSize : 0);
+    const dealChildren = Number(source.children) || 0;
+    const dealChildAges = Array.isArray(source.childAges) ? source.childAges : [];
 
     setQuote(q => ({
       ...q,
       deal: source._id,
       contact: contactId,
-      // Only override empties — operator may have already typed something.
-      startDate: q.startDate || startDate,
-      endDate: q.endDate || endDate,
+      startDate: overwrite ? dealStart : (q.startDate || dealStart),
+      endDate: overwrite ? dealEnd : (q.endDate || dealEnd),
+      // Pricing-critical: carry the rate audience + park-fee tier the operator
+      // qualified on the deal, so the quote (and the AI draft, which reads these
+      // off quote state) don't silently fall back to retail / non-resident.
+      clientType: source.clientType || q.clientType,
+      nationality: source.nationality || q.nationality,
       travelers: {
         ...q.travelers,
-        adults: source.groupSize > 0 ? source.groupSize : q.travelers.adults,
+        adults: dealAdults || q.travelers.adults,
+        children: overwrite ? dealChildren : (dealChildren || q.travelers.children),
+        childAges: overwrite ? dealChildAges : (dealChildAges.length ? dealChildAges : q.travelers.childAges),
       },
       pricing: {
         ...q.pricing,
@@ -556,7 +557,20 @@ export default function QuoteBuilderPage() {
       },
     }));
     setLinkMode('deal');
-  }, [id, deals, searchParams]);
+  };
+
+  // New quote arriving from a deal page (`/quotes/new?deal=<id>`) — pre-fill
+  // from the deal so the operator doesn't re-key context. Runs once `deals`
+  // has loaded so we can find the source object.
+  useEffect(() => {
+    if (id) return;                          // editing an existing quote — skip
+    const dealParam = searchParams.get('deal');
+    if (!dealParam) return;
+    if (!deals.length) return;               // wait for fetch
+    if (quote.deal) return;                  // already populated (e.g. user edited)
+    const source = deals.find(d => d._id === dealParam);
+    if (source) applyDealToQuote(source);
+  }, [id, deals, searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Recalculate pricing when days change — honors per-day margin overrides.
   //
@@ -1239,6 +1253,10 @@ export default function QuoteBuilderPage() {
   // distinguish a user-driven currency switch (must reprice) from initial
   // load / deal-prefill (already priced in the loaded currency).
   const [pendingCurrencyReprice, setPendingCurrencyReprice] = useState(false);
+  // Set by the start-date input; consumed by the effect below. Lets us reprice
+  // already-priced days for the new season without firing on initial load or
+  // deal-prefill (those change startDate without setting this flag).
+  const [pendingDateReprice, setPendingDateReprice] = useState(false);
   const repriceAll = async () => {
     setRepricing(true);
     let priced = 0;
@@ -1321,6 +1339,19 @@ export default function QuoteBuilderPage() {
       repriceAll();
     }
   }, [quote.pricing.currency, pendingCurrencyReprice, repricing]);
+
+  // The start date sets every day's check-in, so changing it can land the stay
+  // in a different rate-list season. Reprice the existing picks (repriceAll
+  // preserves room/meal/transport choices) so prices never silently lag the
+  // dates. Only when there's something priced to update; deferred via the flag
+  // so prefill / initial load don't trigger it.
+  useEffect(() => {
+    if (pendingDateReprice && !repricing) {
+      setPendingDateReprice(false);
+      const hasPriced = (quote.days || []).some(d => d.hotel?.hotelId || d.transport?.transportId || d.activities?.length);
+      if (quote.startDate && hasPriced) repriceAll();
+    }
+  }, [quote.startDate, pendingDateReprice, repricing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSave = async (status) => {
     if (!quote.title) { toast.error('Please add a title'); return; }
@@ -1590,12 +1621,15 @@ export default function QuoteBuilderPage() {
                       value={quote.deal || ''}
                       onChange={(e) => {
                         const dealId = e.target.value;
-                        // Auto-derive contact from the picked deal — Deal.contact
-                        // is canonical, and downstream code (share page, voucher
-                        // generator, invoice builder) reads quote.contact.
-                        const picked = deals.find(d => d._id === dealId);
-                        const contactId = picked?.contact?._id || picked?.contact || '';
-                        setQuote({ ...quote, deal: dealId || '', contact: contactId });
+                        if (!dealId) { setQuote({ ...quote, deal: '', contact: '' }); return; }
+                        // Apply the FULL deal context (dates, pax split, clientType,
+                        // nationality, currency) — same as the deal-panel "Create
+                        // Quote" path. Switching from another deal (a misclick fix)
+                        // overwrites the old deal's values; a first pick only fills
+                        // blanks so manual input survives.
+                        const switching = !!quote.deal && quote.deal !== dealId;
+                        const source = deals.find(d => d._id === dealId);
+                        if (source) applyDealToQuote(source, { overwrite: switching });
                       }}
                       className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
                     >
@@ -1650,7 +1684,7 @@ export default function QuoteBuilderPage() {
                 <input
                   type="date"
                   value={quote.startDate}
-                  onChange={(e) => setQuote({ ...quote, startDate: e.target.value })}
+                  onChange={(e) => { setQuote({ ...quote, startDate: e.target.value }); setPendingDateReprice(true); }}
                   className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
                 />
               </div>
@@ -2030,7 +2064,7 @@ export default function QuoteBuilderPage() {
                 <button
                   onClick={() => setShowPackagePicker(true)}
                   className="px-4 py-3 rounded-xl border-2 border-dashed border-border text-sm text-muted-foreground hover:border-primary hover:text-primary transition-colors whitespace-nowrap"
-                  title="Apply a pre-built package (fills days + adds line item)"
+                  title="Apply a pre-built package (replaces itinerary + pricing)"
                 >
                   From Package
                 </button>
@@ -2109,6 +2143,19 @@ export default function QuoteBuilderPage() {
             <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-1.5">
               <DollarSign className="w-4 h-4" /> Pricing
             </h3>
+
+            {/* No-date guard: accommodation seasons resolve off the stay dates,
+                so a quote with no start date is silently priced at TODAY's
+                season — which can land on the wrong rates. Warn while that's
+                the case and there's something priced. */}
+            {!quote.startDate && quote.days?.length > 0 && (
+              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-2.5 flex items-start gap-1.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                <p className="text-xs text-amber-800">
+                  No travel dates set — accommodation is priced at <span className="font-semibold">today's season</span> and may not reflect the real travel period. Set a start date to price the correct season.
+                </p>
+              </div>
+            )}
 
             <div className="space-y-3">
               <div className="flex justify-between text-sm">
@@ -2270,7 +2317,7 @@ export default function QuoteBuilderPage() {
           </div>
 
           {/* AI Tools */}
-          <AIPanel quote={quote} setQuote={setQuote} destinations={destinations} />
+          <AIPanel quote={quote} setQuote={setQuote} linkedDeal={deals.find(d => d._id === quote.deal) || null} />
 
           {/* Inclusions & Exclusions — quote-level operator-curated text.
               Per-hotel rate-list inclusions/exclusions can also be folded
@@ -2386,7 +2433,7 @@ export default function QuoteBuilderPage() {
 
 // ─── AI PANEL ───────────────────────────────────
 
-function AIPanel({ quote, setQuote, destinations }) {
+function AIPanel({ quote, setQuote, linkedDeal }) {
   const { organization } = useAuth();
   const aiUsed = organization?.aiCreditsUsed ?? 0;
   const aiLimit = organization?.aiCreditsLimit ?? 0;
@@ -2399,21 +2446,7 @@ function AIPanel({ quote, setQuote, destinations }) {
     : undefined;
 
   const [generatingNarratives, setGeneratingNarratives] = useState(false);
-  const [suggestingRoute, setSuggestingRoute] = useState(false);
-  const [routeResult, setRouteResult] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
-
-  // Calculate trip length from dates or segments
-  const calcTripLength = () => {
-    if (quote.startDate && quote.endDate) {
-      const diff = Math.ceil((new Date(quote.endDate) - new Date(quote.startDate)) / (1000 * 60 * 60 * 24));
-      if (diff > 0) return diff;
-    }
-    return quote.days?.length || 7;
-  };
-
-  const [tripLength, setTripLength] = useState(calcTripLength());
-  const [interests, setInterests] = useState('safari, beach');
 
   const generateNarratives = async () => {
     if (!quote.days?.length) { toast.error('Add days first'); return; }
@@ -2455,63 +2488,54 @@ function AIPanel({ quote, setQuote, destinations }) {
     }
   };
 
-  const suggestRoute = async () => {
-    setSuggestingRoute(true);
-    try {
-      const destNames = (destinations || []).map(d => d.name);
-      const { data } = await api.post('/ai/suggest-route', {
-        landingCity: quote.startPoint || 'Nairobi',
-        tripLength: parseInt(tripLength) || 7,
-        interests: interests.split(',').map(i => i.trim()),
-        budget: quote.pricing.currency === 'KES' ? 'mid-range' : 'luxury',
-        destinations: destNames.length > 0 ? destNames : undefined,
-        travelers: `${quote.travelers.adults} adults${quote.travelers.children > 0 ? `, ${quote.travelers.children} children` : ''}`,
-        tourType: quote.tourType,
-      });
-      setRouteResult(data);
-    } catch (err) {
-      if (import.meta.env.DEV) {
-        console.error('Route suggest error:', err?.response?.status, err?.response?.data, err?.message);
-      }
-      toast.error(err.response?.data?.message || err.message || 'Route suggestion failed');
-    } finally {
-      setSuggestingRoute(false);
-    }
-  };
-
-  const applyRoute = () => {
-    if (!routeResult?.route) return;
-    // Convert route stops into days (one day per night at each location)
-    const newDays = [];
-    let dayNum = 1;
-    routeResult.route.forEach((r) => {
-      for (let i = 0; i < (r.nights || 1); i++) {
-        newDays.push({
-          dayNumber: dayNum++,
-          title: i === 0 ? `Arrive ${r.destination}` : r.destination,
-          location: r.destination,
-          isTransitDay: false,
-          narrative: '',
-          meals: { breakfast: i > 0, lunch: false, dinner: i === 0, notes: '' },
-          hotel: null,
-          roomType: '',
-          activities: [],
-          transport: null,
-          images: [],
-          dayCost: 0,
-        });
-      }
-    });
-    setQuote({ ...quote, days: newDays });
-    setRouteResult(null);
-    toast.success('Route applied! Now select hotels and activities.');
-  };
-
   // ─── Draft from prompt ───
   const [showPromptDraft, setShowPromptDraft] = useState(false);
   const [draftPrompt, setDraftPrompt] = useState('');
   const [draftBudget, setDraftBudget] = useState('mid-range');
+  const [showBudget, setShowBudget] = useState(false); // budget tier is an optional override now
   const [drafting, setDrafting] = useState(false);
+
+  // Trip length is no longer a manual field. It comes from the quote's travel
+  // dates when set; otherwise the model infers it from the prompt prose
+  // ("7-day safari", "12th–20th"). This stops a stale field from silently
+  // overriding what the operator typed.
+  const dateSpanDays = (quote.startDate && quote.endDate)
+    ? Math.max(0, Math.ceil((new Date(quote.endDate) - new Date(quote.startDate)) / 86400000))
+    : 0;
+
+  // Seed the draft prompt from the linked deal so the operator doesn't re-type
+  // a trip they already described on the lead/deal. Mirrors the misclick logic:
+  // a FIRST deal only seeds a blank prompt (never clobbers manual typing / an
+  // existing edited quote); SWITCHING to a different deal re-seeds with the new
+  // deal's description, since the previous text was the old (wrong) deal's.
+  // `seededDealIdRef` tracks which deal the current prompt came from.
+  const seededDealIdRef = useRef(null);
+  useEffect(() => {
+    if (!linkedDeal) return;
+    const prevDealId = seededDealIdRef.current;
+    if (prevDealId === linkedDeal._id) return;     // already handled this deal
+    const isSwitch = prevDealId !== null;          // a different deal was linked before
+    seededDealIdRef.current = linkedDeal._id;
+
+    const parts = [];
+    if (linkedDeal.tripType) parts.push(`${linkedDeal.tripType} trip`);
+    if (linkedDeal.destination) parts.push(`Destinations: ${linkedDeal.destination}`);
+    if (linkedDeal.budget > 0) {
+      // Whole-trip total (not per-person) — the system prompt treats it as
+      // overall context, not an accommodation+activities target.
+      const cur = linkedDeal.budgetCurrency || linkedDeal.currency || 'USD';
+      parts.push(`Total trip budget: ~${cur} ${linkedDeal.budget.toLocaleString()} for the group${linkedDeal.groupSize ? ` (${linkedDeal.groupSize} pax)` : ''}.`);
+    }
+    if (linkedDeal.specialRequests) parts.push(linkedDeal.specialRequests);
+    const seed = parts.join('\n\n').trim();
+    if (!seed) return;
+
+    // First pick: only seed a blank prompt on a fresh quote. Switch: the new
+    // deal's description wins (overwrites the old deal's seed).
+    if (!isSwitch && (draftPrompt || quote.days?.length)) return;
+    setDraftPrompt(seed);
+    setShowPromptDraft(true);
+  }, [linkedDeal?._id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const draftFromPrompt = () => {
     if (!draftPrompt.trim()) { toast.error('Describe the trip first'); return; }
@@ -2533,9 +2557,14 @@ function AIPanel({ quote, setQuote, destinations }) {
     try {
       const { data } = await api.post('/ai/draft-itinerary', {
         prompt: draftPrompt,
-        tripLength: parseInt(tripLength) || undefined,
+        // Length: travel dates win; otherwise omit and let the model read it
+        // from the prompt prose.
+        tripLength: dateSpanDays || undefined,
         travelers: quote.travelers.adults + quote.travelers.children,
-        budget: draftBudget,
+        // Budget tier only sent when the operator explicitly set the optional
+        // override; otherwise the model infers from the prompt (which already
+        // carries the deal's budget figure and experience level).
+        budget: showBudget ? draftBudget : undefined,
         startDate: quote.startDate || undefined,
         adults: quote.travelers.adults,
         childAges: quote.travelers.childAges || [],
@@ -2544,13 +2573,57 @@ function AIPanel({ quote, setQuote, destinations }) {
         quoteCurrency: quote.pricing.currency,
       });
 
-      setQuote({
-        ...quote,
-        title: data.title || quote.title,
-        coverNarrative: data.coverNarrative || quote.coverNarrative,
-        highlights: data.highlights?.length ? data.highlights : quote.highlights,
-        days: data.days || [],
+      // Fields the prompt explicitly stated (already used to price the draft on
+      // the server) — sync the top form to match so form, prices, and itinerary
+      // agree. Only fields the operator stated are present; the rest are absent.
+      const applied = data.applied || {};
+      setQuote(q => {
+        const next = {
+          ...q,
+          title: data.title || q.title,
+          coverNarrative: data.coverNarrative || q.coverNarrative,
+          highlights: data.highlights?.length ? data.highlights : q.highlights,
+          days: data.days || [],
+        };
+        if (applied.startDate) next.startDate = applied.startDate;
+        const baseStart = applied.startDate || q.startDate;
+        if (applied.nights && baseStart) {
+          const end = new Date(baseStart);
+          end.setDate(end.getDate() + applied.nights);
+          next.endDate = end.toISOString().slice(0, 10);
+        }
+        if (applied.adults != null || applied.children != null || applied.childAges) {
+          next.travelers = {
+            ...q.travelers,
+            adults: applied.adults ?? q.travelers.adults,
+            children: applied.children ?? (applied.childAges ? applied.childAges.length : q.travelers.children),
+            childAges: applied.childAges ?? q.travelers.childAges,
+          };
+        }
+        if (applied.clientType) next.clientType = applied.clientType;
+        if (applied.nationality) next.nationality = applied.nationality;
+        // Currency set directly (no reprice flag) — the draft already priced in
+        // this currency server-side.
+        if (applied.currency) next.pricing = { ...q.pricing, currency: applied.currency };
+        return next;
       });
+
+      // Tell the operator exactly what the prompt set, so an AI misread is
+      // visible and correctable rather than silent.
+      const bits = [];
+      if (applied.startDate) bits.push(`start ${applied.startDate}`);
+      if (applied.nights) bits.push(`${applied.nights} nights`);
+      if (applied.adults != null || applied.children != null || applied.childAges) {
+        const a = applied.adults ?? quote.travelers.adults;
+        const k = applied.children ?? (applied.childAges ? applied.childAges.length : quote.travelers.children);
+        bits.push(`${a} adult${a === 1 ? '' : 's'}${k ? ` + ${k} child${k === 1 ? '' : 'ren'}` : ''}`);
+      }
+      if (applied.nationality) bits.push(applied.nationality);
+      if (applied.clientType) bits.push(`${applied.clientType} rate`);
+      if (applied.currency) bits.push(applied.currency);
+      if (bits.length) {
+        toast(`Set from your prompt: ${bits.join(', ')}`, { icon: '✨', duration: 6000 });
+      }
 
       // Catalog-match feedback — tells the operator which destinations we matched from
       // their inventory, or warns when we found nothing and they need to add partners.
@@ -2606,14 +2679,19 @@ function AIPanel({ quote, setQuote, destinations }) {
                 className="w-full px-2 py-1.5 rounded-md bg-card border border-purple-200 text-xs focus:outline-none focus:border-purple-400 resize-none"
                 placeholder="e.g. 8-day Kenya honeymoon, focus on wildlife in Mara and beach in Diani, mid-range budget"
               />
-              <div className="grid grid-cols-2 gap-1.5">
+              {/* Length comes from travel dates or the prompt text itself — no
+                  manual Days field. Budget tier is an optional override. */}
+              {dateSpanDays > 0 && (
+                <p className="text-[10px] text-muted-foreground">Length: {dateSpanDays} days (from travel dates). Otherwise just say it in the prompt.</p>
+              )}
+              {!showBudget ? (
+                <button type="button" onClick={() => setShowBudget(true)}
+                  className="text-[10px] text-purple-600 hover:text-purple-700 underline">
+                  + Set budget tier (optional)
+                </button>
+              ) : (
                 <div>
-                  <label className="block text-[9px] text-muted-foreground mb-0.5">Days</label>
-                  <input type="number" min={3} max={21} value={tripLength} onChange={(e) => setTripLength(e.target.value)}
-                    className="w-full px-2 py-1 rounded-md bg-card border border-purple-200 text-xs focus:outline-none focus:border-purple-400" />
-                </div>
-                <div>
-                  <label className="block text-[9px] text-muted-foreground mb-0.5">Budget</label>
+                  <label className="block text-[9px] text-muted-foreground mb-0.5">Budget tier</label>
                   <select value={draftBudget} onChange={(e) => setDraftBudget(e.target.value)}
                     className="w-full px-2 py-1 rounded-md bg-card border border-purple-200 text-xs focus:outline-none focus:border-purple-400">
                     <option value="budget">Budget</option>
@@ -2621,7 +2699,7 @@ function AIPanel({ quote, setQuote, destinations }) {
                     <option value="luxury">Luxury</option>
                   </select>
                 </div>
-              </div>
+              )}
               <div className="flex gap-1.5">
                 <button onClick={draftFromPrompt} disabled={drafting || !draftPrompt.trim() || aiQuotaExhausted}
                   title={quotaTitle}
@@ -2653,65 +2731,6 @@ function AIPanel({ quote, setQuote, destinations }) {
           </p>
         )}
 
-        {/* Route suggestion */}
-        <div className="pt-2 border-t border-border">
-          <p className="text-xs font-medium text-muted-foreground mb-2">Suggest Route</p>
-          <p className="text-[10px] text-muted-foreground/70 mb-2">
-            From {quote.startPoint || 'Nairobi'} · {quote.travelers.adults + quote.travelers.children} travelers · {quote.tourType}
-          </p>
-          <div className="grid grid-cols-2 gap-2 mb-2">
-            <div>
-              <label className="block text-[10px] text-muted-foreground/70 mb-0.5">Days</label>
-              <input
-                type="number"
-                min={3}
-                max={21}
-                value={tripLength}
-                onChange={(e) => setTripLength(e.target.value)}
-                className="w-full px-2 py-1.5 rounded-md bg-background border border-border text-xs focus:outline-none focus:border-primary"
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] text-muted-foreground/70 mb-0.5">Interests</label>
-              <input
-                type="text"
-                value={interests}
-                onChange={(e) => setInterests(e.target.value)}
-                className="w-full px-2 py-1.5 rounded-md bg-background border border-border text-xs focus:outline-none focus:border-primary"
-                placeholder="safari, beach"
-              />
-            </div>
-          </div>
-          <button
-            onClick={suggestRoute}
-            disabled={suggestingRoute}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs text-muted-foreground font-medium hover:border-primary/50 hover:text-primary transition-colors disabled:opacity-50"
-          >
-            <MapPin className="w-3 h-3" />
-            {suggestingRoute ? 'Thinking...' : 'Suggest Route'}
-          </button>
-        </div>
-
-        {/* Route result */}
-        {routeResult && (
-          <div className="mt-2 p-3 rounded-lg bg-green-50 border border-green-200 animate-scale-in">
-            <p className="text-xs text-green-800 font-medium mb-2">{routeResult.summary}</p>
-            <div className="space-y-1 mb-2">
-              {routeResult.route?.map((r, i) => (
-                <div key={i} className="flex items-center justify-between text-xs">
-                  <span className="text-green-700 font-medium">{r.destination}</span>
-                  <span className="text-green-600">{r.nights} nights</span>
-                </div>
-              ))}
-            </div>
-            <button
-              onClick={applyRoute}
-              className="w-full px-3 py-1.5 rounded-md bg-green-600 text-white text-xs font-medium hover:bg-green-700 transition-colors"
-            >
-              Apply This Route
-            </button>
-          </div>
-        )}
       </div>
 
       <ConfirmModal

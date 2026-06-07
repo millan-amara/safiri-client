@@ -5,6 +5,7 @@ import api from '../utils/api';
 import { formatCurrency, formatDate, getInitials } from '../utils/helpers';
 import toast from 'react-hot-toast';
 import CSVImportModal from '../components/crm/CSVImportModal';
+import LeadImportModal from '../components/crm/LeadImportModal';
 import DealModal from '../components/crm/DealModal';
 import ContactModal from '../components/crm/ContactModal';
 import TaskModal from '../components/crm/TaskModal';
@@ -14,7 +15,7 @@ import SavedViewsDropdown from '../components/crm/SavedViewsDropdown';
 import {
   Users, Kanban, CheckSquare, Plus, Search, X, Mail, Phone,
   MapPin, Calendar, DollarSign, ArrowRight, Clock, MoreHorizontal, Upload,
-  ChevronDown, Edit2, Trash2, AlertCircle, CalendarDays, Square,
+  ChevronDown, Edit2, Trash2, AlertCircle, CalendarDays, Square, FileText,
 } from 'lucide-react';
 
 const CRM_TABS = [
@@ -37,6 +38,7 @@ export default function CRMPage() {
   const [showAddDeal, setShowAddDeal] = useState(false);
   const [showAddContact, setShowAddContact] = useState(false);
   const [showCSVImport, setShowCSVImport] = useState(false);
+  const [showLeadImport, setShowLeadImport] = useState(false);
   const [showAddTask, setShowAddTask] = useState(false);
   const [editTask, setEditTask] = useState(null);
   const [expandedTask, setExpandedTask] = useState(null);
@@ -282,6 +284,9 @@ export default function CRMPage() {
           <button onClick={() => setShowCSVImport(true)} className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg bg-white border border-sand-200 text-slate-brand text-xs sm:text-sm font-medium hover:border-sand-300 transition-colors">
             <Upload className="w-4 h-4" /> <span className="hidden xs:inline">Import </span>CSV
           </button>
+          <button onClick={() => setShowLeadImport(true)} className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg bg-white border border-sand-200 text-slate-brand text-xs sm:text-sm font-medium hover:border-sand-300 transition-colors">
+            <FileText className="w-4 h-4" /> <span className="hidden xs:inline">Lead </span>PDF
+          </button>
           <button onClick={() => setShowAddContact(true)} className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg bg-white border border-sand-200 text-slate-brand text-xs sm:text-sm font-medium hover:border-sand-300 transition-colors">
             <Plus className="w-4 h-4" /> Contact
           </button>
@@ -522,6 +527,15 @@ export default function CRMPage() {
       {showCSVImport && (
         <CSVImportModal
           onClose={() => setShowCSVImport(false)}
+          onImported={fetchAll}
+        />
+      )}
+
+      {/* Lead PDF Import Modal */}
+      {showLeadImport && (
+        <LeadImportModal
+          pipelines={pipelines}
+          onClose={() => setShowLeadImport(false)}
           onImported={fetchAll}
         />
       )}

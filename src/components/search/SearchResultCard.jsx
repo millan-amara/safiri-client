@@ -50,12 +50,28 @@ function HotelMeta({ result }) {
 
 function HotelPriceBlock({ price }) {
   if (price.pricingMode === 'perPersonEstimate') {
+    const ce = price.childEstimate;
     return (
       <div className="text-right">
         <div className="text-base font-semibold text-slate-brand whitespace-nowrap">
           From {fmtMoney(price.perPerson, price.currency)}
         </div>
-        <div className="text-[10px] text-sand-500">per person sharing</div>
+        <div className="text-[10px] text-sand-500">per adult sharing</div>
+        {ce?.perChild?.length > 0 && (
+          <div className="mt-0.5 text-[10px] text-sand-600 whitespace-nowrap">
+            {ce.perChild.map((c, i) => (
+              <span key={i}>
+                {i > 0 ? ' · ' : ''}
+                child {c.age}: {c.mode === 'free' ? 'free' : fmtMoney(c.amount, price.currency)}
+              </span>
+            ))}
+          </div>
+        )}
+        {ce?.estPartyPerNight > 0 && (
+          <div className="text-[10px] text-sand-500">
+            ≈ {fmtMoney(ce.estPartyPerNight, price.currency)}/night, party
+          </div>
+        )}
       </div>
     );
   }
