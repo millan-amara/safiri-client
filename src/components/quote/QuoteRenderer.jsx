@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { mealPlanLabels } from '../../utils/helpers';
+import { formatQuoteCurrency } from '../../utils/quoteFormat';
 import { safeHref } from '../../utils/safeUrl';
 
 const HOTEL_TYPE_LABELS = {
@@ -52,15 +53,10 @@ const COUNTRY_LOCALE = {
   'South Africa': 'en-ZA',
 };
 
+// Dates localise to the contact's country; currency does not (see quoteFormat).
 const makeFormatters = (locale) => ({
   formatDate: (d, opts = { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) =>
     d ? new Date(d).toLocaleDateString(locale, opts) : '',
-  // Currency is always en-US convention ($8,493), whole dollars — prices are
-  // USD-denominated and a locale-formatted USD figure (e.g. de-DE "8.492,76 $")
-  // reads as wrong to clients. Dates still localise via `locale`. Mirrors the
-  // PDF's fmtCurrency in pdf-service/template.js.
-  formatCurrency: (amt, cur = 'USD') =>
-    new Intl.NumberFormat('en-US', { style: 'currency', currency: cur, currencyDisplay: 'narrowSymbol', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(amt || 0),
 });
 import {
   MapPin, Calendar, Users as UsersIcon, Clock, ChevronDown,
@@ -348,7 +344,8 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
   const primaryColor = brand.primaryColor || '#B45309';
   const secondaryColor = brand.secondaryColor || primaryColor;
   const locale = COUNTRY_LOCALE[quote.contact?.country] || 'en-US';
-  const { formatDate, formatCurrency } = makeFormatters(locale);
+  const { formatDate } = makeFormatters(locale);
+  const formatCurrency = formatQuoteCurrency;
   const isDraft = quote.status === 'draft';
   const style = STYLE_PRESETS[quote.pdfStyle] || STYLE_PRESETS.editorial;
   const coverLayout = quote.coverLayout || 'full_bleed';

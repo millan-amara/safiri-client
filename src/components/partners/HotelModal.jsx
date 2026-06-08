@@ -415,6 +415,60 @@ export default function HotelModal({ hotel, onClose, onSaved }) {
     }
   };
 
+  // Merge the rate lists CURRENTLY loaded in the form into an existing hotel of
+  // the same name, instead of saving a duplicate. On a multi-hotel upload the
+  // first property loads into the form (the rest go to the banner, which has its
+  // own Merge buttons) — without this, that one property couldn't be merged and
+  // was always orphaned. After merging we pull the next pending property into
+  // the form so the operator can work straight through every property.
+  const mergeFormInto = async (existingId) => {
+    if (!existingId) return;
+    setBatchSaving(true);
+    try {
+      const normalizedLists = (form.rateLists || []).map(normalizeList);
+      const { data } = await api.put(`/partners/hotels/${existingId}/merge-rate-lists`, {
+        rateLists: normalizedLists,
+        description: form.description || '',
+        amenities: form.amenities ? form.amenities.split(',').map(s => s.trim()).filter(Boolean) : [],
+        source: form._sourceFile || '',
+      });
+      const appended = (data.appendedListNames || []).length;
+      const merged = (data.mergedListNames || []).length;
+      const conflicts = (data.pendingUpdates || []).length;
+      const bits = [];
+      if (appended) bits.push(`${appended} new list${appended === 1 ? '' : 's'}`);
+      if (merged) bits.push(`${merged} list${merged === 1 ? '' : 's'} updated`);
+      if (conflicts) bits.push(`${conflicts} conflict${conflicts === 1 ? '' : 's'} to review`);
+      toast.success(bits.length ? `${form.name}: ${bits.join(' · ')}` : `No changes — "${form.name}" already had all ${normalizedLists.length} list(s)`);
+      onSaved?.();
+
+      // Advance to the next pending property, or finish if this was the last one.
+      if (pendingOtherHotels.length) {
+        const [next, ...rest] = pendingOtherHotels;
+        setPendingOtherHotels(rest);
+        setForm(prev => ({
+          ...prev,
+          name: next.name || '',
+          destination: next.destination || '',
+          location: next.location || '',
+          stars: next.stars || 3,
+          type: next.type || 'hotel',
+          description: next.description || '',
+          currency: next.currency || 'USD',
+          rateLists: next.rateLists || [],
+        }));
+        setTab('rates');
+        toast(`Loaded "${next.name}" into the form`, { icon: '➡️' });
+      } else {
+        onClose();
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Merge failed');
+    } finally {
+      setBatchSaving(false);
+    }
+  };
+
   // Operator decision on a single pending update: 'accept' applies the new
   // value; 'reject' keeps the old; 'defer' parks it. Server clears resolved
   // entries from the queue. We update local state to match.
@@ -638,6 +692,38 @@ export default function HotelModal({ hotel, onClose, onSaved }) {
             </div>
           </div>
         )}
+
+        {/* Which property is in the form right now, and — if it already exists —
+            a Merge button so it isn't orphaned. Only in create mode (in edit
+            mode the form IS a known hotel and Save updates it directly). */}
+        {!isEdit && form.name && (form.rateLists?.length > 0) && (() => {
+          const formMatch = findMatchingHotel(form.name);
+          const listCount = form.rateLists.length;
+          return formMatch ? (
+            <div className="rounded-lg border border-blue-300 bg-blue-50 p-3">
+              <p className="text-xs font-semibold text-blue-900">
+                “{form.name}” already exists in your hotels
+              </p>
+              <p className="text-[11px] text-blue-800/80 mt-0.5">
+                Merge the {listCount} rate list{listCount === 1 ? '' : 's'} loaded here into the existing record instead of creating a duplicate — or use Save below to add it as a separate hotel.
+              </p>
+              <button
+                type="button"
+                onClick={() => mergeFormInto(formMatch._id)}
+                disabled={batchSaving}
+                className="mt-2 px-3 py-1 rounded bg-blue-600 text-white text-[11px] font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
+              >
+                {batchSaving ? 'Merging…' : `Merge into “${form.name}”`}
+              </button>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+              <p className="text-[11px] text-slate-600">
+                Editing rates for <span className="font-semibold text-slate-800">“{form.name}”</span> — new hotel. Save below to create it.
+              </p>
+            </div>
+          );
+        })()}
 
         {pendingOtherHotels.length > 0 && (
           <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
