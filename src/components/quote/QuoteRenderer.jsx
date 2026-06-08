@@ -55,8 +55,12 @@ const COUNTRY_LOCALE = {
 const makeFormatters = (locale) => ({
   formatDate: (d, opts = { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) =>
     d ? new Date(d).toLocaleDateString(locale, opts) : '',
+  // Currency is always en-US convention ($8,493), whole dollars — prices are
+  // USD-denominated and a locale-formatted USD figure (e.g. de-DE "8.492,76 $")
+  // reads as wrong to clients. Dates still localise via `locale`. Mirrors the
+  // PDF's fmtCurrency in pdf-service/template.js.
   formatCurrency: (amt, cur = 'USD') =>
-    new Intl.NumberFormat(locale, { style: 'currency', currency: cur, currencyDisplay: 'narrowSymbol', minimumFractionDigits: 0 }).format(amt || 0),
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: cur, currencyDisplay: 'narrowSymbol', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(amt || 0),
 });
 import {
   MapPin, Calendar, Users as UsersIcon, Clock, ChevronDown,

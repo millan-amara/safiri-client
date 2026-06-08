@@ -128,6 +128,40 @@ const cheapestPerPersonOf = (hotelDoc) => {
   return min;
 };
 
+// ISO date `n` days after `iso` (yyyy-mm-dd), or null. Mirrors the resolver's
+// per-day check-in math (startDate + dayIndex).
+const addDaysIso = (iso, n) => {
+  if (!iso) return null;
+  const d = new Date(iso);
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+
+// The rate-list season that covers `isoDate`, else the first season. Used to
+// show the picker rate panel for the actual travel season rather than today's.
+const seasonForDate = (rateList, isoDate) => {
+  const seasons = rateList?.seasons || [];
+  if (!seasons.length) return null;
+  if (isoDate) {
+    const t = new Date(isoDate).getTime();
+    const hit = seasons.find(s => (s.dateRanges || []).some(r =>
+      r?.from && r?.to && t >= new Date(r.from).getTime() && t <= new Date(r.to).getTime()
+    ));
+    if (hit) return hit;
+  }
+  return seasons[0];
+};
+
+// Compact human label for a child bracket — surfaces the own-room vs sharing
+// distinction the operator wants to see ("4–11: 50% sharing", "0–3: free").
+const childBracketLabel = (b) => {
+  const age = `${b.minAge ?? 0}–${b.maxAge ?? 17}`;
+  const amt = b.mode === 'free' ? 'free' : b.mode === 'flat' ? `flat ${b.value}` : `${b.value}%`;
+  const rule = b.sharingRule === 'own_room' ? 'own room' : b.sharingRule === 'any' ? 'either' : 'sharing';
+  const pos = b.position && b.position !== 'any' ? ` (${b.position.replace('_plus', '+')})` : '';
+  return `${age}: ${amt} ${rule}${pos}`;
+};
+
 // Distinct meal plans offered by a hotel partner doc across its active
 // rate lists. Drives the per-stay meal-plan dropdown (#3.12).
 const mealPlansForHotel = (hotelDoc) => {
@@ -2031,6 +2065,7 @@ export default function QuoteBuilderPage() {
                 destinations={destinations}
                 currency={quote.pricing.currency}
                 marginPercent={quote.pricing.marginPercent}
+                checkInDate={addDaysIso(quote.startDate, idx)}
                 onSelectHotel={(hotel) => selectHotelForDay(idx, hotel)}
                 onExtendStay={() => extendStayFromDay(idx)}
                 onChangeRoomType={(rt) => setRoomTypeForStay(idx, rt)}
@@ -3312,7 +3347,7 @@ function LineItemsEditor({ lineItems, onChange, segments, marginPercent, currenc
 function DayCard({
   day, index, dayPt = 0, isExpanded, onToggle, onUpdate, onRemove, onMoveUp, onMoveDown,
   onDuplicate, onAddAfter, isFirst, isLast,
-  hotels, activities, transport, destinations, currency, marginPercent,
+  hotels, activities, transport, destinations, currency, marginPercent, checkInDate,
   onSelectHotel, onExtendStay, onChangeRoomType, onChangeMealPlan, onAddActivity, onRemoveActivity,
   onSelectTransport, onClearTransport, onUpdateTransportField,
   onAddImage, onRemoveImage, onSetHero, onAcknowledgeCondition,
@@ -3320,6 +3355,7 @@ function DayCard({
   const [showHotelPicker, setShowHotelPicker] = useState(false);
   const [hotelQuery, setHotelQuery] = useState('');
   const [hotelSort, setHotelSort] = useState('name'); // 'name' | 'price' | 'stars'
+  const [openRatesFor, setOpenRatesFor] = useState(null); // hotel id whose rate panel is expanded in the picker
   const [showActivityPicker, setShowActivityPicker] = useState(false);
   const [showTransportPicker, setShowTransportPicker] = useState(false);
   // Per-km vehicles need a distance before they can be priced; this captures
@@ -3733,7 +3769,10 @@ function DayCard({
                     return (
                       <div key={h._id} className="bg-card rounded p-2 border border-border">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-xs font-medium text-foreground truncate">{h.name}</p>
+                          <p className="text-xs font-medium text-foreground truncate">
+                            {h.name}
+                            {h.stars ? <span className="ml-1 text-[10px] text-amber-500">{'★'.repeat(h.stars)}</span> : null}
+                          </p>
                           <button
                             onClick={() => { onSelectHotel(h); setShowHotelPicker(false); }}
                             className="text-[10px] px-2 py-0.5 rounded bg-primary text-white hover:opacity-90 shrink-0"
@@ -3742,13 +3781,57 @@ function DayCard({
                           </button>
                         </div>
                         {activeLists.length > 0 ? (
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {activeLists.map((l, li) => (
-                              <span key={li} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                                {l.name} · {(l.audience || []).join('/')} · {l.currency} · {l.mealPlan}
-                              </span>
-                            ))}
-                          </div>
+                          <>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {activeLists.map((l, li) => (
+                                <span key={li} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                                  {l.name} · {(l.audience || []).join('/')} · {l.currency} · {l.mealPlan}
+                                </span>
+                              ))}
+                            </div>
+                            <button
+                              onClick={() => setOpenRatesFor(openRatesFor === h._id ? null : h._id)}
+                              className="mt-1 text-[10px] text-primary hover:underline"
+                            >
+                              {openRatesFor === h._id ? 'Hide rates' : 'View rates'}
+                            </button>
+                            {openRatesFor === h._id && (
+                              <div className="mt-1.5 space-y-1.5">
+                                {activeLists.map((l, li) => {
+                                  const season = seasonForDate(l, checkInDate);
+                                  const rooms = season?.rooms || [];
+                                  return (
+                                    <div key={li} className="rounded border border-border p-1.5">
+                                      <p className="text-[10px] font-medium text-foreground">
+                                        {l.name} · {(l.audience || []).join('/')} · {l.mealPlan} · {l.currency}
+                                        {season?.name ? <span className="text-muted-foreground"> · {season.name}</span> : null}
+                                      </p>
+                                      {rooms.length ? rooms.map((r, ri) => (
+                                        <div key={ri} className="mt-1 text-[10px]">
+                                          <div className="flex justify-between gap-2">
+                                            <span className="font-medium text-foreground truncate">{r.roomType}</span>
+                                            <span className="text-muted-foreground shrink-0">
+                                              single {r.singleOccupancy || '—'} · sharing {r.perPersonSharing || '—'}{r.pricingMode === 'per_room_total' ? '/rm' : 'pp'}{r.triplePerPerson ? ` · triple ${r.triplePerPerson}` : ''}
+                                            </span>
+                                          </div>
+                                          {(r.childBrackets || []).length > 0 && (
+                                            <div className="text-muted-foreground/70">child — {r.childBrackets.map(childBracketLabel).join('; ')}</div>
+                                          )}
+                                        </div>
+                                      )) : (
+                                        <p className="text-[10px] text-muted-foreground/70 mt-1">No room pricing for this season.</p>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                                <p className="text-[9px] text-muted-foreground/60">
+                                  {checkInDate
+                                    ? `Rates for the season covering ${checkInDate}, in each list's currency. Final price depends on room split & pax.`
+                                    : "Set travel dates to show the exact season. Amounts in each list's currency."}
+                                </p>
+                              </div>
+                            )}
+                          </>
                         ) : (
                           <p className="text-[10px] text-muted-foreground/70 mt-1">No rate lists configured</p>
                         )}
