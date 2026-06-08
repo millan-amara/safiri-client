@@ -1262,7 +1262,7 @@ export default function QuoteBuilderPage() {
     (quote.days || []).forEach((d, i) => {
       (d.hotel?.conditions || []).forEach((c, ci) => {
         if (c.severity === 'blocking' && !c.acknowledged) {
-          out.push({ dayIndex: i, conditionIndex: ci, hotel: d.hotel?.name, text: c.text });
+          out.push({ dayIndex: i, conditionIndex: ci, hotel: d.hotel?.name, text: c.text, source: c.source || '' });
         }
       });
     });
@@ -2030,6 +2030,53 @@ export default function QuoteBuilderPage() {
 
           {/* Timeline / Segments */}
           <div className="space-y-3">
+            {/* Blocking-conditions summary. The per-day Acknowledge buttons live
+                inside each (singly-)expanded day card, so blockers on collapsed
+                days are invisible — this banner gathers them all with inline
+                Acknowledge + click-to-jump so the operator can clear the Save &
+                Send gate without hunting day-by-day. */}
+            {unacknowledgedBlockers.length > 0 && (
+              <div className="rounded-xl border border-red-300 bg-red-50 p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                  <p className="text-xs font-semibold text-red-900">
+                    {unacknowledgedBlockers.length} blocking condition{unacknowledgedBlockers.length === 1 ? '' : 's'} must be acknowledged before this quote can be sent
+                  </p>
+                </div>
+                <ul className="space-y-1.5">
+                  {unacknowledgedBlockers.map((b, i) => {
+                    const isFx = b.source === 'system:fx';
+                    return (
+                      <li key={i} className="flex items-start gap-2 text-[11px] bg-white border border-red-200 rounded-lg p-2">
+                        <div className="flex-1 min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => setExpandedDay(b.dayIndex)}
+                            className="text-red-700 font-semibold hover:underline"
+                          >
+                            Day {b.dayIndex + 1}{b.hotel ? ` · ${b.hotel}` : ''}
+                          </button>
+                          <p className="text-red-900/80 leading-snug mt-0.5">{b.text}</p>
+                          {isFx && (
+                            <p className="text-[10px] text-red-700/70 mt-0.5">
+                              Missing exchange rate — set it in Settings and re-price for an accurate total, or acknowledge to send at an inaccurate 1:1 rate.
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => acknowledgeCondition(b.dayIndex, b.conditionIndex)}
+                          className="text-[10px] font-semibold px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 shrink-0"
+                        >
+                          Acknowledge
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+
             {/* Start point */}
             <div className="flex items-center gap-3 px-2">
               <div className="w-8 h-8 rounded-full bg-green-500 text-white flex items-center justify-center text-xs font-bold flex-shrink-0">S</div>
