@@ -738,14 +738,8 @@ export default function QuoteBuilderPage() {
       const patch = typeof updates === 'function' ? updates(days[index]) : updates;
       days[index] = { ...days[index], ...patch };
 
-      // Auto-calc day cost. Prefer the quote-currency value (converted via FX
-      // at pick time) over the raw source-currency value, so a USD quote with
-      // KES activities doesn't silently mix currencies in the total.
-      const day = days[index];
-      const hotelCost = day.hotel?.ratePerNightInQuoteCurrency || day.hotel?.ratePerNight || 0;
-      const actCost = day.activities?.reduce((s, a) => s + (a.totalCostInQuoteCurrency ?? a.totalCost ?? 0), 0) || 0;
-      const transCost = day.transport?.totalCostInQuoteCurrency ?? day.transport?.totalCost ?? 0;
-      days[index].dayCost = hotelCost + actCost + transCost;
+      // Auto-calc day cost from the day's priced components.
+      days[index].dayCost = recomputeDayCost(days[index]);
 
       return { ...prev, days };
     });
@@ -944,8 +938,9 @@ export default function QuoteBuilderPage() {
     }
   };
 
-  // Recompute a day's cost from its priced snapshots. Mirrors the inline
-  // logic in updateDay so the run-pricing path stays in sync with it.
+  // Recompute a day's cost from its priced snapshots. Shared by updateDay
+  // (single-day edits), applyPricedRun (run-pricing), and moveActivityToDay
+  // (relocating an activity) so every path stays in sync.
   const recomputeDayCost = (day) => {
     const hotelCost = day.hotel?.ratePerNightInQuoteCurrency || day.hotel?.ratePerNight || 0;
     const actCost = day.activities?.reduce((s, a) => s + (a.totalCostInQuoteCurrency ?? a.totalCost ?? 0), 0) || 0;
@@ -1160,6 +1155,28 @@ export default function QuoteBuilderPage() {
 
   const removeActivityFromDay = (dayIndex, actIdx) => {
     updateDay(dayIndex, prev => ({ activities: (prev.activities || []).filter((_, i) => i !== actIdx) }));
+  };
+
+  // Move an already-priced activity from one day to another (operator
+  // consolidating activities that the AI split across consecutive same-location
+  // days). No re-pricing needed — pax is unchanged, so the activity's snapshot
+  // stays valid; we just relocate it and recompute both days' dayCost in a
+  // single state write so the totals don't flicker or race.
+  const moveActivityToDay = (fromIndex, actIdx, toIndex) => {
+    if (fromIndex === toIndex) return;
+    const name = quote.days?.[fromIndex]?.activities?.[actIdx]?.name || 'Activity';
+    setQuote(prev => {
+      const days = [...prev.days];
+      const fromDay = days[fromIndex];
+      const act = fromDay?.activities?.[actIdx];
+      if (!act || !days[toIndex]) return prev;
+      days[fromIndex] = { ...fromDay, activities: fromDay.activities.filter((_, i) => i !== actIdx) };
+      days[toIndex] = { ...days[toIndex], activities: [...(days[toIndex].activities || []), act] };
+      days[fromIndex].dayCost = recomputeDayCost(days[fromIndex]);
+      days[toIndex].dayCost = recomputeDayCost(days[toIndex]);
+      return { ...prev, days };
+    });
+    toast.success(`Moved “${name}” to Day ${toIndex + 1}`);
   };
 
   // Pick a transport for a day. Server applies the pricingModel + FX. The
@@ -2119,6 +2136,8 @@ export default function QuoteBuilderPage() {
                 onChangeMealPlan={(mp) => setMealPlanForStay(idx, mp)}
                 onAddActivity={(activity) => addActivityToDay(idx, activity)}
                 onRemoveActivity={(actIdx) => removeActivityFromDay(idx, actIdx)}
+                onMoveActivity={(actIdx, toIdx) => moveActivityToDay(idx, actIdx, toIdx)}
+                allDays={quote.days || []}
                 onSelectTransport={(t, opts) => setTransportForDay(idx, t, opts)}
                 onClearTransport={() => clearTransportForDay(idx)}
                 onUpdateTransportField={(field, value) => updateDayTransportField(idx, field, value)}
@@ -2653,6 +2672,13 @@ function AIPanel({ quote, setQuote, linkedDeal }) {
         clientType: quote.clientType,
         nationality: quote.nationality,
         quoteCurrency: quote.pricing.currency,
+        // Current gateway so the AI can use it in arrival/departure narratives
+        // (and override a stale Nairobi default when the route doesn't fit).
+        startPoint: quote.startPoint || undefined,
+        endPoint: quote.endPoint || undefined,
+        // Explicit room split so the draft's first prices match the operator's
+        // occupancy choice (blank → resolver infers, unchanged).
+        rooms: normalizeRooms(quote.travelers?.rooms) || undefined,
       });
 
       // Fields the prompt explicitly stated (already used to price the draft on
@@ -2665,6 +2691,8 @@ function AIPanel({ quote, setQuote, linkedDeal }) {
           title: data.title || q.title,
           coverNarrative: data.coverNarrative || q.coverNarrative,
           highlights: data.highlights?.length ? data.highlights : q.highlights,
+          startPoint: data.startPoint || q.startPoint,
+          endPoint: data.endPoint || q.endPoint,
           days: data.days || [],
         };
         if (applied.startDate) next.startDate = applied.startDate;
@@ -3396,12 +3424,18 @@ function DayCard({
   onDuplicate, onAddAfter, isFirst, isLast,
   hotels, activities, transport, destinations, currency, marginPercent, checkInDate,
   onSelectHotel, onExtendStay, onChangeRoomType, onChangeMealPlan, onAddActivity, onRemoveActivity,
+  onMoveActivity, allDays = [],
   onSelectTransport, onClearTransport, onUpdateTransportField,
   onAddImage, onRemoveImage, onSetHero, onAcknowledgeCondition,
 }) {
   const [showHotelPicker, setShowHotelPicker] = useState(false);
   const [hotelQuery, setHotelQuery] = useState('');
   const [hotelSort, setHotelSort] = useState('name'); // 'name' | 'price' | 'stars'
+  // Location-match is a smart default, not a hard rule — a guest visiting
+  // Naivasha can stay at a lodge filed under nearby Elementaita. This lets the
+  // operator widen the picker to every hotel when the right one sits in an
+  // adjacent area.
+  const [showAllLocations, setShowAllLocations] = useState(false);
   const [openRatesFor, setOpenRatesFor] = useState(null); // hotel id whose rate panel is expanded in the picker
   const [showActivityPicker, setShowActivityPicker] = useState(false);
   const [showTransportPicker, setShowTransportPicker] = useState(false);
@@ -3776,28 +3810,42 @@ function DayCard({
                   {/* Search + sort (#2.4) — painless triage when an org has
                       many lodges in a region. Pure client-side over the
                       already location-matched list. */}
-                  <div className="flex items-center gap-1.5 sticky top-0 bg-background pb-1.5">
-                    <input
-                      type="text"
-                      value={hotelQuery}
-                      onChange={(e) => setHotelQuery(e.target.value)}
-                      placeholder="Search hotels…"
-                      className="flex-1 px-2 py-1 rounded-md bg-card border border-border text-[11px] focus:outline-none focus:border-primary"
-                    />
-                    <select
-                      value={hotelSort}
-                      onChange={(e) => setHotelSort(e.target.value)}
-                      className="px-1.5 py-1 rounded-md bg-card border border-border text-[10px] focus:outline-none focus:border-primary"
-                      title="Sort hotels"
-                    >
-                      <option value="name">Name</option>
-                      <option value="price">$ low→hi</option>
-                      <option value="stars">★ high→lo</option>
-                    </select>
+                  <div className="sticky top-0 bg-background pb-1.5 space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={hotelQuery}
+                        onChange={(e) => setHotelQuery(e.target.value)}
+                        placeholder="Search hotels…"
+                        className="flex-1 px-2 py-1 rounded-md bg-card border border-border text-[11px] focus:outline-none focus:border-primary"
+                      />
+                      <select
+                        value={hotelSort}
+                        onChange={(e) => setHotelSort(e.target.value)}
+                        className="px-1.5 py-1 rounded-md bg-card border border-border text-[10px] focus:outline-none focus:border-primary"
+                        title="Sort hotels"
+                      >
+                        <option value="name">Name</option>
+                        <option value="price">$ low→hi</option>
+                        <option value="stars">★ high→lo</option>
+                      </select>
+                    </div>
+                    {day.location && (
+                      <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={showAllLocations}
+                          onChange={(e) => setShowAllLocations(e.target.checked)}
+                          className="accent-primary"
+                        />
+                        Show hotels from all locations (not just {day.location})
+                      </label>
+                    )}
                   </div>
                   {(() => {
                     const q = hotelQuery.trim().toLowerCase();
-                    const list = matchedHotels
+                    const baseList = showAllLocations ? hotels : matchedHotels;
+                    const list = baseList
                       .filter(h => !q || `${h.name} ${h.destination || ''} ${h.location || ''}`.toLowerCase().includes(q))
                       .slice()
                       .sort((a, b) => {
@@ -3807,19 +3855,31 @@ function DayCard({
                       });
                     return list.length === 0 ? (
                     <p className="text-xs text-muted-foreground/70 text-center py-2">
-                      {matchedHotels.length === 0 ? 'No hotels for this location. Add some in Partners.' : `No hotels match “${hotelQuery}”.`}
+                      {baseList.length === 0
+                        ? (showAllLocations ? 'No hotels yet. Add some in Partners.' : 'No hotels for this location.')
+                        : `No hotels match “${hotelQuery}”.`}
+                      {!showAllLocations && matchedHotels.length === 0 && hotels.length > 0 && ' Tick “all locations” above to pick from elsewhere.'}
                     </p>
                   ) : list.map(h => {
+                    const offArea = showAllLocations && day.location && !destMatch(h.destination, day.location) && !destMatch(h.location, day.location);
                     // Preview: show every active rate list's label so operator
                     // can see audience/meal plan options before clicking.
                     const activeLists = (h.rateLists || []).filter(l => l.isActive !== false);
                     return (
                       <div key={h._id} className="bg-card rounded p-2 border border-border">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-xs font-medium text-foreground truncate">
-                            {h.name}
-                            {h.stars ? <span className="ml-1 text-[10px] text-amber-500">{'★'.repeat(h.stars)}</span> : null}
-                          </p>
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium text-foreground truncate">
+                              {h.name}
+                              {h.stars ? <span className="ml-1 text-[10px] text-amber-500">{'★'.repeat(h.stars)}</span> : null}
+                            </p>
+                            {(h.location || h.destination) && (
+                              <p className="text-[10px] text-muted-foreground/70 truncate">
+                                {[h.location, h.destination].filter(Boolean).join(' · ')}
+                                {offArea && <span className="ml-1 text-amber-600 font-medium">· other area</span>}
+                              </p>
+                            )}
+                          </div>
                           <button
                             onClick={() => { onSelectHotel(h); setShowHotelPicker(false); }}
                             className="text-[10px] px-2 py-0.5 rounded bg-primary text-white hover:opacity-90 shrink-0"
@@ -3948,8 +4008,27 @@ function DayCard({
                             )}
                           </div>
                         </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
                           <span className="text-[10px] text-muted-foreground">{formatCurrency(totalDisplay, currency)}</span>
+                          {allDays.length > 1 && (
+                            <select
+                              value=""
+                              onChange={(e) => {
+                                const to = Number(e.target.value);
+                                if (!Number.isNaN(to)) onMoveActivity?.(i, to);
+                                e.target.value = '';
+                              }}
+                              title="Move this activity to another day"
+                              className="text-[10px] bg-transparent border border-border rounded px-1 py-0.5 text-muted-foreground/80 focus:outline-none focus:border-primary cursor-pointer"
+                            >
+                              <option value="">Move…</option>
+                              {allDays.map((d, di) => di === index ? null : (
+                                <option key={di} value={di}>
+                                  → Day {di + 1}{d.location ? ` · ${d.location}` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          )}
                           <button onClick={() => onRemoveActivity(i)} className="text-muted-foreground/70 hover:text-red-500">
                             <X className="w-3 h-3" />
                           </button>
