@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { formatCurrency, cldThumb, formatDuration } from '../utils/helpers';
 import toast from 'react-hot-toast';
 import QuoteRenderer from '../components/quote/QuoteRenderer';
+import QuoteEmailModal from '../components/crm/QuoteEmailModal';
 import {
   ArrowLeft, Plus, GripVertical, Trash2, Hotel, Ticket, FileText,
   Truck, DollarSign, Save, Send, Eye, ChevronDown, ChevronUp,
@@ -286,6 +287,12 @@ export default function QuoteBuilderPage() {
   // `templateModal` carries the Save-as-Template form fields.
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [templateModal, setTemplateModal] = useState(null);
+  // `emailModal` carries the saved quote we're about to email (set by
+  // Save & Send after a successful save). The server flips draft → sent on send.
+  const [emailModal, setEmailModal] = useState(null);
+  // Lets the operator dismiss the no-travel-dates pricing warning so it stops
+  // pushing the pricing breakdown down the page once they've seen it.
+  const [dateWarningDismissed, setDateWarningDismissed] = useState(false);
   // Header overflow ("⋯") menu for rare actions, so the action row isn't
   // a wall of equal-weight buttons.
   const [overflowOpen, setOverflowOpen] = useState(false);
@@ -1404,8 +1411,12 @@ export default function QuoteBuilderPage() {
     }
   }, [quote.startDate, pendingDateReprice, repricing]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Persist the quote. Returns the saved doc (so callers like Save & Send can
+  // chain on it) or null on failure. `status` defaults to the quote's current
+  // status — sending is handled separately by the email flow, which owns the
+  // draft → sent flip.
   const handleSave = async (status) => {
-    if (!quote.title) { toast.error('Please add a title'); return; }
+    if (!quote.title) { toast.error('Please add a title'); return null; }
     setSaving(true);
     try {
       // Coerce contact/deal to bare ID strings — defensive in case they ever
@@ -1419,22 +1430,62 @@ export default function QuoteBuilderPage() {
         contact: idOf(quote.contact),
         deal: idOf(searchParams.get('deal') || quote.deal),
       };
+      let saved;
       if (id) {
-        await api.put(`/quotes/${id}`, payload);
+        const { data } = await api.put(`/quotes/${id}`, payload);
+        saved = data;
         toast.success('Quote saved');
       } else {
         const { data } = await api.post('/quotes', payload);
+        saved = data;
         toast.success('Quote created');
         navigate(`/quotes/${data._id}`);
       }
       // Saved state is now the clean baseline — clear the dirty flag so
       // navigating away no longer prompts.
       savedRef.current = JSON.stringify(quoteRef.current);
+      return saved;
     } catch (err) {
       toast.error(err.response?.data?.message || 'Save failed');
+      return null;
     } finally {
       setSaving(false);
     }
+  };
+
+  // Save & Send: persist first, then open the email modal so the operator can
+  // confirm the recipient and add a note. The send itself (and the draft →
+  // sent flip) happens server-side from the modal — no PDF download needed.
+  // Resolve the client's name + email for the send modal. A quote is linked to
+  // EITHER a deal (whose contact is populated) OR a contact id (resolved from
+  // the loaded contacts list) — in the builder, quote.contact is just an id, so
+  // we look it up rather than expecting a populated object.
+  const resolveQuoteClient = () => {
+    const dealId = quote.deal || searchParams.get('deal');
+    if (dealId) {
+      const d = deals.find(x => x._id === dealId);
+      if (d?.contact?.email) return { firstName: d.contact.firstName, email: d.contact.email };
+    }
+    const cid = (quote.contact && typeof quote.contact === 'object') ? quote.contact._id : quote.contact;
+    if (cid) {
+      const c = contacts.find(x => x._id === cid)
+        || (typeof quote.contact === 'object' ? quote.contact : null);
+      if (c?.email) return { firstName: c.firstName, email: c.email };
+    }
+    return { firstName: '', email: '' };
+  };
+
+  const handleSaveAndSend = async () => {
+    const saved = await handleSave();
+    if (!saved) return;
+    setEmailModal({
+      _id: saved._id || id,
+      quoteNumber: saved.quoteNumber,
+      title: quote.title,
+      // Pass the resolved client so the modal can pre-fill the To field. The
+      // server independently falls back to the linked contact's email too.
+      contact: resolveQuoteClient(),
+    });
   };
 
   // Skeleton that mirrors the builder layout while an existing quote
@@ -1592,7 +1643,7 @@ export default function QuoteBuilderPage() {
             <Save className="w-4 h-4" /> Save Draft
           </button>
           <button
-            onClick={() => handleSave('sent')}
+            onClick={handleSaveAndSend}
             disabled={saving || unacknowledgedBlockers.length > 0}
             title={unacknowledgedBlockers.length > 0
               ? `${unacknowledgedBlockers.length} blocking condition${unacknowledgedBlockers.length === 1 ? '' : 's'} must be acknowledged before sending`
@@ -2249,12 +2300,20 @@ export default function QuoteBuilderPage() {
                 so a quote with no start date is silently priced at TODAY's
                 season — which can land on the wrong rates. Warn while that's
                 the case and there's something priced. */}
-            {!quote.startDate && quote.days?.length > 0 && (
+            {!quote.startDate && quote.days?.length > 0 && !dateWarningDismissed && (
               <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-2.5 flex items-start gap-1.5">
                 <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
                 <p className="text-xs text-amber-800">
                   No travel dates set — accommodation is priced at <span className="font-semibold">today's season</span> and may not reflect the real travel period. Set a start date to price the correct season.
                 </p>
+                <button
+                  onClick={() => setDateWarningDismissed(true)}
+                  className="ml-auto -mr-0.5 -mt-0.5 p-0.5 rounded text-amber-600 hover:text-amber-800 hover:bg-amber-100 flex-shrink-0"
+                  title="Dismiss"
+                  aria-label="Dismiss warning"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
               </div>
             )}
 
@@ -2445,6 +2504,9 @@ export default function QuoteBuilderPage() {
             onChange={(blocks) => setQuote({ ...quote, blocks })}
           />
 
+          {/* Optional Extras curation — pick which add-ons clients see */}
+          <OptionalExtrasCuration quote={quote} setQuote={setQuote} />
+
           {/* Payment terms */}
           <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
             <h3 className="text-sm font-semibold text-foreground mb-2">Payment Terms</h3>
@@ -2528,6 +2590,17 @@ export default function QuoteBuilderPage() {
           }
         }}
       />
+      {emailModal && (
+        <QuoteEmailModal
+          quote={emailModal}
+          onClose={() => setEmailModal(null)}
+          onSent={() => {
+            setEmailModal(null);
+            // Reflect the server-side draft → sent flip locally without a refetch.
+            setQuote(q => (q.status === 'draft' ? { ...q, status: 'sent' } : q));
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -4620,6 +4693,73 @@ function BlockToggles({ blocks = [], onChange }) {
                 <button onClick={() => move(idx, 1)} disabled={idx === sorted.length - 1} className="text-muted-foreground/40 hover:text-muted-foreground disabled:opacity-20">
                   <ChevronDown className="w-3 h-3" />
                 </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Optional Extras Curation ────────────────────
+// Add-ons are attached to each day's hotel snapshot during pricing, but they
+// default to HIDDEN on the client quote (showOnQuote !== true) so routine
+// supplier supplements like meals don't auto-surface. This panel lets the
+// operator opt specific add-ons in. Identical add-ons across lodges are deduped
+// into one row; toggling sets showOnQuote on every matching snapshot entry.
+const ADDON_UNIT_LABELS_BUILDER = {
+  per_person_per_day: '/ person / day',
+  per_day: '/ day',
+  per_trip: '/ trip',
+  per_person: '/ person',
+  per_room_per_day: '/ room / day',
+  per_vehicle: '/ vehicle',
+};
+const addOnKey = (a) => `${(a.name || '').toLowerCase().trim()}|${a.unit || ''}|${a.amountInQuoteCurrency || 0}`;
+
+function OptionalExtrasCuration({ quote, setQuote }) {
+  // Unique optional add-ons across all stays. Mandatory add-ons (optional ===
+  // false) belong in line items, not the client-facing extras list.
+  const seen = new Map();
+  const shownKeys = new Set();
+  for (const d of (quote.days || [])) {
+    for (const a of (d.hotel?.addOns || [])) {
+      if (a.optional === false) continue;
+      const key = addOnKey(a);
+      if (!seen.has(key)) seen.set(key, a);
+      if (a.showOnQuote === true) shownKeys.add(key);
+    }
+  }
+  const extras = Array.from(seen.entries()).map(([key, a]) => ({ key, ...a }));
+  if (extras.length === 0) return null;
+
+  const toggle = (key) => {
+    const next = !shownKeys.has(key);
+    const days = (quote.days || []).map(d => {
+      if (!d.hotel?.addOns?.length) return d;
+      const addOns = d.hotel.addOns.map(a => addOnKey(a) === key ? { ...a, showOnQuote: next } : a);
+      return { ...d, hotel: { ...d.hotel, addOns } };
+    });
+    setQuote({ ...quote, days });
+  };
+
+  return (
+    <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
+      <h3 className="text-sm font-semibold text-foreground mb-1">Optional Extras</h3>
+      <p className="text-[10px] text-muted-foreground mb-3">Choose which add-ons clients see. Off by default — meals and routine supplements stay hidden unless you add them.</p>
+      <div className="space-y-1">
+        {extras.map(ex => {
+          const shown = shownKeys.has(ex.key);
+          const unit = ADDON_UNIT_LABELS_BUILDER[ex.unit] || (ex.unit ? `/ ${String(ex.unit).replace(/_/g, ' ')}` : '');
+          return (
+            <div key={ex.key} className={`flex items-center gap-2 p-2 rounded-lg border transition-colors ${shown ? 'bg-background border-border' : 'bg-card border-border opacity-60'}`}>
+              <button onClick={() => toggle(ex.key)} className="flex-shrink-0" title={shown ? 'Showing on quote' : 'Hidden from quote'}>
+                {shown ? <Eye className="w-3.5 h-3.5 text-primary" /> : <EyeOff className="w-3.5 h-3.5 text-muted-foreground/70" />}
+              </button>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-foreground truncate">{ex.name}</p>
+                <p className="text-[9px] text-muted-foreground/70 truncate">{formatCurrency(ex.amountInQuoteCurrency || 0, quote.pricing?.currency)} {unit}</p>
               </div>
             </div>
           );

@@ -272,19 +272,34 @@ const formatAddOnUnit = (u) => ADDON_UNIT_LABELS[u] || (u ? `/ ${String(u).repla
 // "available at this lodge" sub-sections rather than a flat soup. Mandatory
 // add-ons are excluded — those belong in line items, not the showcase.
 function collectAddOns(days) {
-  const byHotel = new Map();
-  const seenStays = new Set();
+  const byKey = new Map();
+  const stays = new Set();
   for (const d of (days || [])) {
     const h = d.hotel;
     if (!h?.name) continue;
     const stayKey = `${h.hotelId || h.name}`;
-    if (seenStays.has(stayKey)) continue;
-    seenStays.add(stayKey);
-    const optional = (h.addOns || []).filter(a => a.optional !== false);
-    if (!optional.length) continue;
-    byHotel.set(h.name, optional);
+    if (stays.has(stayKey)) continue;
+    stays.add(stayKey);
+    for (const a of (h.addOns || [])) {
+      // Opt-in only: an add-on reaches the client quote when the operator has
+      // explicitly flagged it (showOnQuote). Default stays hidden so routine
+      // supplier supplements (meals) don't auto-surface as "extras". Dedupe
+      // identical add-ons across lodges by name + unit + price so the same
+      // item isn't listed once per property.
+      if (a.showOnQuote !== true) continue;
+      const key = `${(a.name || '').toLowerCase().trim()}|${a.unit || ''}|${a.amountInQuoteCurrency || 0}`;
+      const existing = byKey.get(key);
+      if (existing) {
+        if (!existing.hotels.includes(h.name)) existing.hotels.push(h.name);
+      } else {
+        byKey.set(key, { ...a, hotels: [h.name] });
+      }
+    }
   }
-  return Array.from(byHotel.entries()).map(([hotelName, addOns]) => ({ hotelName, addOns }));
+  const stayCount = stays.size;
+  // `everywhere` = offered at every stay, so the renderer can skip the
+  // per-lodge "available at" line when it adds no information.
+  return Array.from(byKey.values()).map(a => ({ ...a, everywhere: a.hotels.length >= stayCount }));
 }
 
 // Format a supplement entry (rate-list source currency) into a quote-currency
@@ -983,32 +998,30 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
             Optional Extras
           </h2>
           <p className="text-sm text-stone-500 mb-6">
-            Available at your accommodations — speak to your travel designer to add any of these to your itinerary.
+            Optional experiences you can add to your trip — just let us know and we'll take care of the rest.
           </p>
-          <div className="space-y-5">
-            {tripAddOns.map((group, gi) => (
-              <div key={gi} className="rounded-2xl border border-stone-200 bg-white p-5">
-                <p className="text-[11px] uppercase tracking-wider text-stone-400 font-semibold mb-3">{group.hotelName}</p>
-                <div className="divide-y divide-stone-100">
-                  {group.addOns.map((a, ai) => (
-                    <div key={ai} className="py-3 first:pt-0 last:pb-0 flex items-start justify-between gap-4">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-stone-700">{a.name}</p>
-                        {a.description && (
-                          <p className="text-xs text-stone-500 mt-0.5 leading-relaxed">{a.description}</p>
-                        )}
-                      </div>
-                      <div className="text-right whitespace-nowrap">
-                        <div className="text-sm font-semibold text-stone-800">
-                          {formatCurrency(a.amountInQuoteCurrency || 0, quote.pricing?.currency)}
-                        </div>
-                        <div className="text-[10px] text-stone-400">{formatAddOnUnit(a.unit)}</div>
-                      </div>
+          <div className="rounded-2xl border border-stone-200 bg-white p-5">
+            <div className="divide-y divide-stone-100">
+              {tripAddOns.map((a, ai) => (
+                <div key={ai} className="py-3 first:pt-0 last:pb-0 flex items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-stone-700">{a.name}</p>
+                    {a.description && (
+                      <p className="text-xs text-stone-500 mt-0.5 leading-relaxed">{a.description}</p>
+                    )}
+                    {!a.everywhere && a.hotels?.length > 0 && (
+                      <p className="text-[11px] text-stone-400 mt-0.5">Available at {a.hotels.join(', ')}</p>
+                    )}
+                  </div>
+                  <div className="text-right whitespace-nowrap">
+                    <div className="text-sm font-semibold text-stone-800">
+                      {formatCurrency(a.amountInQuoteCurrency || 0, quote.pricing?.currency)}
                     </div>
-                  ))}
+                    <div className="text-[10px] text-stone-400">{formatAddOnUnit(a.unit)}</div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </section>
       )}
@@ -1207,7 +1220,7 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
       )}
 
       {/* ─── PAYMENT TERMS BLOCK ───────────────────── */}
-      {blockEnabled('payment_terms') && (quote.paymentTerms || tripPolicy.depositPct > 0 || tripPolicy.cancellationTiers.length > 0 || tripPolicy.bookingTerms.length > 0 || tripConditions.length > 0) && (
+      {blockEnabled('payment_terms') && (quote.paymentTerms || tripPolicy.depositPct > 0 || tripPolicy.cancellationTiers.length > 0 || (previewMode && (tripPolicy.bookingTerms.length > 0 || tripConditions.length > 0))) && (
         <section className="max-w-5xl mx-auto px-6 pb-16">
           <div className="p-6 rounded-2xl bg-stone-50 border border-stone-200 space-y-5">
             <div>
@@ -1218,18 +1231,21 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
             </div>
 
             {(() => {
-              // When the operator has written their own payment terms, that
-              // is the canonical policy. Per-hotel deposit % and cancellation
-              // tiers (aggregated from each lodge) then become a secondary,
-              // collapsed reference rather than competing policies the client
-              // has to reconcile (#4.3). With no paymentTerms text, keep the
-              // full aggregated display.
+              // The operator's typed payment terms are canonical for the
+              // DEPOSIT, so when present we suppress the aggregated per-hotel
+              // deposit % — otherwise the client sees two conflicting figures
+              // (e.g. "40% deposit" in the text vs an aggregated "25%"). The
+              // cancellation ladder isn't expressed in that free text, so it's
+              // always shown openly as the trip's Cancellation Policy. Per-tier
+              // supplier names are operator-only reference: shown in the builder
+              // preview, hidden from the client.
               const policyOverridden = !!(quote.paymentTerms && quote.paymentTerms.trim());
-              const hasPerHotel = tripPolicy.depositPct > 0 || tripPolicy.cancellationTiers.length > 0;
-              if (!hasPerHotel) return null;
-              const blocks = (
+              const showDeposit = !policyOverridden && tripPolicy.depositPct > 0;
+              const hasCancellation = tripPolicy.cancellationTiers.length > 0;
+              if (!showDeposit && !hasCancellation) return null;
+              return (
                 <>
-                  {tripPolicy.depositPct > 0 && (
+                  {showDeposit && (
                     <div className="flex items-center gap-3">
                       <div className="text-2xl font-bold" style={{ color: primaryColor }}>
                         {tripPolicy.depositPct}%
@@ -1243,7 +1259,7 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                     </div>
                   )}
 
-                  {tripPolicy.cancellationTiers.length > 0 && (
+                  {hasCancellation && (
                     <div>
                       <p className="text-xs font-bold uppercase tracking-wider text-stone-400 mb-2">
                         Cancellation Policy
@@ -1261,7 +1277,7 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                               <tr key={i} className="border-b border-stone-100 last:border-0">
                                 <td className="py-2 px-3 text-stone-600">
                                   {t.daysBefore}+ days
-                                  {t.sources && t.sources.length > 0 && (
+                                  {previewMode && t.sources && t.sources.length > 0 && (
                                     <span className="text-[10px] text-stone-400 italic ml-2">
                                       ({t.sources.join(', ')})
                                     </span>
@@ -1282,22 +1298,17 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
                   )}
                 </>
               );
-              if (!policyOverridden) return blocks;
-              return (
-                <details className="group">
-                  <summary className="cursor-pointer text-xs text-stone-500 hover:text-stone-700 select-none">
-                    Some properties have their own deposit / cancellation terms — view
-                  </summary>
-                  <div className="mt-4 space-y-5">{blocks}</div>
-                </details>
-              );
             })()}
 
-            {tripConditions.length > 0 && (
+            {/* Supplier conditions are operator-only (B2B / confidential). Shown
+                here in the builder preview for reference, but never on the
+                client share page or PDF. */}
+            {previewMode && tripConditions.length > 0 && (
               <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-stone-400 mb-2">
+                <p className="text-xs font-bold uppercase tracking-wider text-stone-400 mb-1">
                   Conditions & Notes
                 </p>
+                <p className="text-[10px] text-stone-400 italic mb-2">Operator only — not shown to the client.</p>
                 <div className="space-y-3">
                   {tripConditions.map(({ hotelName, items }, i) => (
                     <div key={i}>
@@ -1325,11 +1336,14 @@ export default function QuoteRenderer({ quote, token, previewMode = false }) {
               </div>
             )}
 
-            {tripPolicy.bookingTerms.length > 0 && (
+            {/* Supplier booking terms are operator-only (B2B / confidential).
+                Shown in the builder preview for reference, never to the client. */}
+            {previewMode && tripPolicy.bookingTerms.length > 0 && (
               <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-stone-400 mb-2">
+                <p className="text-xs font-bold uppercase tracking-wider text-stone-400 mb-1">
                   Booking Terms
                 </p>
+                <p className="text-[10px] text-stone-400 italic mb-2">Operator only — not shown to the client.</p>
                 <div className="space-y-3">
                   {tripPolicy.bookingTerms.map((bt, i) => (
                     <div key={i}>

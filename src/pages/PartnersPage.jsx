@@ -415,7 +415,7 @@ const DELETE_LABELS = {
 };
 import {
   Hotel, Truck, Ticket, Upload, Plus, Search, Edit2, Trash2,
-  X, ChevronDown, Star, MapPin, DollarSign, Filter, Lock, Map, Download,
+  X, ChevronDown, Star, MapPin, DollarSign, Filter, Lock, Map,
 } from 'lucide-react';
 
 const TABS = [
@@ -593,28 +593,6 @@ export default function PartnersPage() {
             accept=".xlsx,.xls,.csv"
             className="hidden"
           />
-          <button
-            onClick={async () => {
-              try {
-                const res = await api.get('/partners/import/template', { responseType: 'blob' });
-                const url = window.URL.createObjectURL(new Blob([res.data]));
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = 'safiripro-import-template.xlsx';
-                document.body.appendChild(link);
-                link.click();
-                link.remove();
-                window.URL.revokeObjectURL(url);
-              } catch (err) {
-                toast.error('Could not download template');
-              }
-            }}
-            className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg bg-card border border-border text-foreground text-xs sm:text-sm font-medium hover:border-border transition-colors"
-            title="Download a blank template with example rows"
-          >
-            <Download className="w-4 h-4" />
-            <span className="hidden xs:inline">Template</span>
-          </button>
           <button
             onClick={() => fileRef.current?.click()}
             disabled={importing}
