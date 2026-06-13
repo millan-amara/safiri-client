@@ -878,6 +878,9 @@ export default function QuoteBuilderPage() {
         nationality: quote.nationality,
         preferredMealPlan: opts.preferredMealPlan,
         preferredRoomType: opts.preferredRoomType,
+        // Explicit operator override of the auto-selected rate list (e.g. when
+        // auto-pick lands on an out-of-period list and the stay prices to zero).
+        preferredRateListId: opts.preferredRateListId || undefined,
         quoteCurrency: quote.pricing.currency,
         // True stay length so the resolver applies the right LoS tier and
         // evaluates minNights/maxNights conditions even though this call
@@ -895,6 +898,9 @@ export default function QuoteBuilderPage() {
             ...baseSnapshot,
             rateListId: data.rateList._id,
             rateListName: data.rateList.name,
+            // Carry the operator's explicit pin (if any) so room-type reprices
+            // keep the chosen list and the dropdown stays in sync.
+            preferredRateListId: opts.preferredRateListId || '',
             audienceApplied: data.rateList.audience,
             mealPlan: data.rateList.mealPlan,
             mealPlanLabel: data.rateList.mealPlanLabel,
@@ -930,7 +936,7 @@ export default function QuoteBuilderPage() {
         };
       }
       return {
-        snapshot: { ...baseSnapshot, ratePerNight: 0, ratePerNightInQuoteCurrency: 0, warnings: data.warnings || [data.reason] },
+        snapshot: { ...baseSnapshot, preferredRateListId: opts.preferredRateListId || '', ratePerNight: 0, ratePerNightInQuoteCurrency: 0, warnings: data.warnings || [data.reason] },
         roomType: '',
         error: data.reason || 'unknown',
         warnings: data.warnings || [],
@@ -1087,6 +1093,13 @@ export default function QuoteBuilderPage() {
     const { range, results } = await priceRun(quote.days, dayIndex, hotelDoc, {
       preferredRoomType: override.preferredRoomType ?? day.hotel.roomType,
       preferredMealPlan: override.preferredMealPlan ?? day.hotel.mealPlan,
+      // An explicit rate-list pin is carried across reprices (e.g. a room-type
+      // change keeps the chosen list). Passing `preferredRateListId: null` in
+      // the override clears it — used by the meal-plan picker, since each list
+      // has a single meal plan and changing it must let auto-pick re-run.
+      preferredRateListId: 'preferredRateListId' in override
+        ? override.preferredRateListId
+        : day.hotel.preferredRateListId,
     });
     if (!range) return;
     reportRun(results);
@@ -1097,7 +1110,11 @@ export default function QuoteBuilderPage() {
     });
   };
   const setRoomTypeForStay = (dayIndex, roomType) => repriceStayWith(dayIndex, { preferredRoomType: roomType });
-  const setMealPlanForStay = (dayIndex, mealPlan) => repriceStayWith(dayIndex, { preferredMealPlan: mealPlan });
+  // Changing the meal plan clears any rate-list pin: a list carries one meal
+  // plan, so the operator's intent is "find the list with this plan."
+  const setMealPlanForStay = (dayIndex, mealPlan) => repriceStayWith(dayIndex, { preferredMealPlan: mealPlan, preferredRateListId: null });
+  // Pin a specific rate list for the whole stay (or '' to return to auto).
+  const setRateListForStay = (dayIndex, rateListId) => repriceStayWith(dayIndex, { preferredRateListId: rateListId || null });
 
   // Add an activity to a day. Server prices in the activity's source currency
   // and converts to quote currency using org FX overrides — we snapshot both
@@ -2185,6 +2202,7 @@ export default function QuoteBuilderPage() {
                 onExtendStay={() => extendStayFromDay(idx)}
                 onChangeRoomType={(rt) => setRoomTypeForStay(idx, rt)}
                 onChangeMealPlan={(mp) => setMealPlanForStay(idx, mp)}
+                onChangeRateList={(id) => setRateListForStay(idx, id)}
                 onAddActivity={(activity) => addActivityToDay(idx, activity)}
                 onRemoveActivity={(actIdx) => removeActivityFromDay(idx, actIdx)}
                 onMoveActivity={(actIdx, toIdx) => moveActivityToDay(idx, actIdx, toIdx)}
@@ -3496,7 +3514,7 @@ function DayCard({
   day, index, dayPt = 0, isExpanded, onToggle, onUpdate, onRemove, onMoveUp, onMoveDown,
   onDuplicate, onAddAfter, isFirst, isLast,
   hotels, activities, transport, destinations, currency, marginPercent, checkInDate,
-  onSelectHotel, onExtendStay, onChangeRoomType, onChangeMealPlan, onAddActivity, onRemoveActivity,
+  onSelectHotel, onExtendStay, onChangeRoomType, onChangeMealPlan, onChangeRateList, onAddActivity, onRemoveActivity,
   onMoveActivity, allDays = [],
   onSelectTransport, onClearTransport, onUpdateTransportField,
   onAddImage, onRemoveImage, onSetHero, onAcknowledgeCondition,
@@ -3764,6 +3782,60 @@ function DayCard({
                     </div>
                     <button onClick={() => setShowHotelPicker(true)} className="text-[10px] text-primary hover:underline">Change</button>
                   </div>
+
+                  {/* Rate-list picker. Auto-selection can land on a list whose
+                      validity window or seasons don't cover the travel date
+                      (e.g. an out-of-period "farm rate"), pricing the stay to
+                      zero. This lets the operator pin the list that actually
+                      applies. Each option is annotated with whether it has a
+                      rate for this date so the right one is obvious. Shown only
+                      when the hotel has more than one active list to choose. */}
+                  {(() => {
+                    const hotelDoc = hotels.find(h => h._id === day.hotel.hotelId);
+                    const lists = (hotelDoc?.rateLists || []).filter(l => l.isActive !== false);
+                    if (lists.length < 2) return null;
+                    // Reflect the list actually used; fall back to the pin if a
+                    // pinned pick failed to price (so the select isn't blank).
+                    const current = day.hotel.rateListId || day.hotel.preferredRateListId || '';
+                    // Does this list have a usable rate for the check-in date?
+                    // Both its validity window and a covering season with rooms
+                    // must hold — the same gates the resolver applies.
+                    const appliesForDate = (l) => {
+                      if (checkInDate) {
+                        const t = new Date(checkInDate).getTime();
+                        if (l.validFrom && t < new Date(l.validFrom).getTime()) return false;
+                        if (l.validTo && t > new Date(l.validTo).getTime()) return false;
+                      }
+                      const season = seasonForDate(l, checkInDate);
+                      return !!(season && (season.rooms || []).length);
+                    };
+                    const pricedZero = !(day.hotel.ratePerNightInQuoteCurrency || day.hotel.ratePerNight);
+                    return (
+                      <div className="mt-1.5">
+                        <div className="flex items-center gap-2">
+                          <label className="text-[10px] text-muted-foreground whitespace-nowrap">Rate list</label>
+                          <select
+                            value={current}
+                            onChange={(e) => onChangeRateList?.(e.target.value)}
+                            className="flex-1 px-2 py-1 rounded-md bg-background border border-border text-[11px] text-foreground focus:outline-none focus:border-primary"
+                          >
+                            <option value="">Auto (best match)</option>
+                            {lists.map(l => (
+                              <option key={l._id} value={l._id}>
+                                {l.name} · {(l.audience || []).join('/')} · {l.mealPlan}
+                                {appliesForDate(l) ? '' : ' — no rate for this date'}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        {pricedZero && (
+                          <p className="mt-1 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-1 leading-snug">
+                            This rate list has no price for {checkInDate || "this stay's date"}. Pick a list marked applicable above to re-price.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* Room-type picker (#2.1). Lists the partner hotel's
                       available room types; changing it reprices the whole
